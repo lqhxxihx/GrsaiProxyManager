@@ -429,7 +429,9 @@ refImages.addEventListener('change', async () => {
 
   for (const f of files) {
     const b64 = await fileToBase64(f);
-    base64Refs.push(b64);
+    // 去掉 data:image/...;base64, 前缀，只保留纯 base64
+    const pureB64 = b64.includes(',') ? b64.split(',')[1] : b64;
+    base64Refs.push(pureB64);
     const img = document.createElement('img');
     img.src = b64; img.className = 'ref-thumb';
     thumbsRow.appendChild(img);
