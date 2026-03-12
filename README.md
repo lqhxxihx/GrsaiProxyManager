@@ -75,7 +75,7 @@ docker compose up -d --build
 
 ## 代理使用方式
 
-将原来请求 `https://grsai.dakka.com.cn` 的地址改为本服务地址，API Key 填写管理员密码：
+将原来请求 `https://grsaiapi.com` 的地址改为本服务地址，API Key 填写管理员密码：
 
 ```bash
 curl -X POST http://localhost:1515/v1/draw/nano-banana \
