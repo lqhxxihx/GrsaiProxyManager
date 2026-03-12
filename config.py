@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-UPSTREAM_BASE_URL = "https://grsai.dakka.com.cn"
+UPSTREAM_BASE_URL = "https://grsaiapi.com"
 MIN_CREDITS = int(os.getenv("MIN_CREDITS", "100"))
 CREDITS_REFRESH_INTERVAL = int(os.getenv("CREDITS_REFRESH_INTERVAL", "300"))
 PORT = int(os.getenv("PORT", "8000"))
