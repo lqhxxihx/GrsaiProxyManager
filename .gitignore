@@ -1,0 +1,34 @@
+# 环境变量（含真实 API Keys，绝对不能提交）
+.env
+
+# 积分缓存（含运行时状态，不需要提交）
+keys_cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# 临时修复脚本
+fix_*.py
+write_admin.py
+gen_admin.py
+check_credits.py
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
