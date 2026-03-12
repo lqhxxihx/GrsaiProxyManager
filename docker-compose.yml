@@ -3,9 +3,8 @@ services:
     build: .
     ports:
       - "1515:1515"
-    env_file:
-      - .env
     volumes:
+      - ./.env:/app/.env
       - ./keys_cache.json:/app/keys_cache.json
       - ./.password:/app/.password
     restart: unless-stopped
