@@ -431,10 +431,24 @@ refImages.addEventListener('change', async () => {
     const b64 = await fileToBase64(f);
     // 去掉 data:image/...;base64, 前缀，只保留纯 base64
     const pureB64 = b64.includes(',') ? b64.split(',')[1] : b64;
+    const idx = base64Refs.length;
     base64Refs.push(pureB64);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block;';
     const img = document.createElement('img');
     img.src = b64; img.className = 'ref-thumb';
-    thumbsRow.appendChild(img);
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕';
+    delBtn.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:18px;padding:0;';
+    delBtn.onclick = function() {
+      const i = Array.from(thumbsRow.children).indexOf(wrap);
+      if (i >= 0) base64Refs.splice(i, 1);
+      wrap.remove();
+      uploadLabel.textContent = base64Refs.length ? base64Refs.length + ' 张图片已选择' : '点击或拖拽上传参考图';
+    };
+    wrap.appendChild(img);
+    wrap.appendChild(delBtn);
+    thumbsRow.appendChild(wrap);
   }
 
   uploadLabel.textContent = files.length + ' 张图片已选择';
