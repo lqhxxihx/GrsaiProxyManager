@@ -15,40 +15,57 @@
 
 ## 快速开始
 
-### 1. 克隆仓库
+### 方式一：直接运行
+
+#### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/GrsaiProxyManager.git
+git clone https://github.com/lqhxxihx/GrsaiProxyManager.git
 cd GrsaiProxyManager
 ```
 
-### 2. 安装依赖
+#### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 配置环境变量
+#### 3. 配置环境变量
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入真实的 API Key 和管理员密码
+# 编辑 .env，填入真实的 API Key 和管理员密码哈希
 ```
 
-`.env` 配置说明：
+生成 bcrypt 密码哈希：
 
-```env
-GRSAI_API_KEYS=sk-key1,sk-key2,sk-key3   # 逗号分隔的 API Key 列表
-MIN_CREDITS=400                            # 低于此积分的 Key 自动禁用
-CREDITS_REFRESH_INTERVAL=300              # 积分刷新间隔（秒）
-PORT=1515                                  # 服务端口
-ADMIN_PASSWORD=your_admin_password        # 管理员密码
+```bash
+python -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
 ```
 
-### 4. 启动服务
+#### 4. 启动服务
 
 ```bash
 uvicorn main:app --port 1515
+```
+
+---
+
+### 方式二：Docker 部署
+
+```bash
+git clone https://github.com/lqhxxihx/GrsaiProxyManager.git
+cd GrsaiProxyManager
+cp .env.example .env
+# 编辑 .env
+docker compose up -d
+```
+
+或手动构建：
+
+```bash
+docker build -t grsai-proxy .
+docker run -d -p 1515:1515 --env-file .env --name grsai-proxy grsai-proxy
 ```
 
 ## 访问地址

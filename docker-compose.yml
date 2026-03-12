@@ -1,0 +1,10 @@
+services:
+  grsai-proxy:
+    build: .
+    ports:
+      - "1515:1515"
+    env_file:
+      - .env
+    volumes:
+      - ./keys_cache.json:/app/keys_cache.json
+    restart: unless-stopped
