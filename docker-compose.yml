@@ -7,4 +7,5 @@ services:
       - .env
     volumes:
       - ./keys_cache.json:/app/keys_cache.json
+      - ./.password:/app/.password
     restart: unless-stopped
