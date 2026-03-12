@@ -36,19 +36,7 @@ pip install -r requirements.txt
 # 编辑 .env，填入真实的 GRSAI_API_KEYS
 ```
 
-生成 bcrypt 密码哈希：
-
-```bash
-python -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
-```
-
-将生成的哈希写入 `.password` 文件：
-
-```bash
-echo '$2b$12$xxx...' > .password
-```
-
-> **默认密码**：`admin123456`（`.password` 文件中已预置，首次部署后请立即修改）
+> **默认密码**：`admin123456`，首次部署后请立即修改
 
 #### 4. 启动服务
 
