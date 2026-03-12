@@ -162,6 +162,8 @@ function makeCard(savedItem) {
   delBtn.textContent = '✕';
   delBtn.title = '删除';
   delBtn.addEventListener('click', () => {
+    const sid = card.dataset.serverId || savedItem.id;
+    fetch('/api/results/' + sid, {method: 'DELETE'}).catch(() => {});
     removeItem(savedItem.id);
     card.remove();
     refreshEmpty();
@@ -233,7 +235,11 @@ function spawnGenerationCard(reqData) {
   const regenBtn = document.createElement('button');
   regenBtn.className = 'btn-regen'; regenBtn.textContent = '⟳'; regenBtn.disabled = true;
 
-  delBtn.addEventListener('click', () => { card.remove(); refreshEmpty(); });
+  delBtn.addEventListener('click', () => {
+    const sid = card.dataset.serverId;
+    if (sid) fetch('/api/results/' + sid, {method: 'DELETE'}).catch(() => {});
+    card.remove(); refreshEmpty();
+  });
 
   toolbar.append(dlBtn, delBtn, regenBtn);
   card.append(wrap, meta, toolbar);
@@ -261,21 +267,20 @@ function spawnGenerationCard(reqData) {
       dlBtn.addEventListener('click', () => downloadImage(url, reqData.prompt));
       regenBtn.addEventListener('click', () => spawnGenerationCard(reqData));
 
-      // persist
-      const id = 'nb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-      card.dataset.itemId = id;
-      const expiry = getExpiryMs();
-      const expTs  = expiry === -1 ? -1 : Date.now() + expiry;
-      saveItem({
-        id, url,
-        prompt: reqData.prompt,
-        model: reqData.model,
-        aspectRatio: reqData.aspectRatio,
-        imageSize: reqData.imageSize,
-        urls: reqData.urls,
-        timestamp: Date.now(),
-        expiry: expTs,
-      });
+      // persist to server
+      fetch('/api/save-image', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, prompt: reqData.prompt, model: reqData.model})
+      }).then(r => r.json()).then(data => {
+        if (data.local_url) {
+          // update img src to local URL
+          const imgEl = card.querySelector('.result-img');
+          if (imgEl) imgEl.src = data.local_url;
+          card.dataset.itemId = data.id;
+          card.dataset.serverId = data.id;
+        }
+      }).catch(() => {});
     },
     onError(msg) {
       // replace overlay with error state
@@ -528,12 +533,30 @@ setInterval(fetchCredits, 30000);
 
 // ── Restore saved results on load ─────────────────────────
 (function restoreFromStorage() {
-  const items = loadSaved();
-  // items are newest-first already (we unshift on save)
-  // render in reverse so newest ends up at top after insertBefore
-  for (let i = items.length - 1; i >= 0; i--) {
-    const card = makeCard(items[i]);
-    resultsGrid.insertBefore(card, resultsGrid.firstChild);
-  }
-  refreshEmpty();
+  // 从服务器加载历史记录
+  fetch('/api/results').then(r => r.json()).then(data => {
+    const items = data.items || [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      const card = makeCard({
+        id: item.id,
+        url: item.local_url,
+        prompt: item.prompt,
+        model: item.model,
+        timestamp: item.timestamp,
+        expiry: -1,
+      });
+      card.dataset.serverId = item.id;
+      resultsGrid.insertBefore(card, resultsGrid.firstChild);
+    }
+    refreshEmpty();
+  }).catch(() => {
+    // 降级到 localStorage
+    const items = loadSaved();
+    for (let i = items.length - 1; i >= 0; i--) {
+      const card = makeCard(items[i]);
+      resultsGrid.insertBefore(card, resultsGrid.firstChild);
+    }
+    refreshEmpty();
+  });
 })();

@@ -1,8 +1,12 @@
+import json
 import logging
+import os
 import secrets
+import uuid
 from typing import List
 
 import bcrypt
+import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +21,23 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
+RESULTS_DIR = "results"
+RESULTS_INDEX = os.path.join(RESULTS_DIR, "index.json")
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+
+def _load_index() -> list:
+    try:
+        with open(RESULTS_INDEX, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_index(items: list) -> None:
+    with open(RESULTS_INDEX, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False)
 
 app = FastAPI(title="GrsaiProxyManager")
 
@@ -250,6 +271,56 @@ async def admin_refresh_subset(body: AddKeysRequest, request: Request):
 
 # ── 静态文件 UI（必须在 catch-all 之前）──────────────────────────────────────
 app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
+app.mount("/results", StaticFiles(directory="results"), name="results")
+
+
+# ── Results API ───────────────────────────────────────────────────────────────
+
+class SaveImageRequest(BaseModel):
+    url: str
+    prompt: str = ""
+    model: str = ""
+
+
+@app.post("/api/save-image")
+async def save_image(body: SaveImageRequest):
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(body.url)
+            resp.raise_for_status()
+        image_id = str(uuid.uuid4())
+        file_path = os.path.join(RESULTS_DIR, f"{image_id}.png")
+        with open(file_path, "wb") as f:
+            f.write(resp.content)
+        import time
+        item = {
+            "id": image_id,
+            "local_url": f"/results/{image_id}.png",
+            "prompt": body.prompt,
+            "model": body.model,
+            "timestamp": int(time.time() * 1000),
+        }
+        items = _load_index()
+        items.insert(0, item)
+        _save_index(items)
+        return JSONResponse(item)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/results")
+async def list_results():
+    return JSONResponse({"items": _load_index()})
+
+
+@app.delete("/api/results/{image_id}")
+async def delete_result(image_id: str):
+    file_path = os.path.join(RESULTS_DIR, f"{image_id}.png")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    items = [i for i in _load_index() if i["id"] != image_id]
+    _save_index(items)
+    return JSONResponse({"ok": True})
 
 
 # ── Transparent proxy — catch-all ──────────────────────────────────────────────
