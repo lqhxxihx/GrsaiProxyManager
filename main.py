@@ -1,15 +1,15 @@
-import hashlib
 import logging
 import secrets
 from typing import List
 
+import bcrypt
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from config import UPSTREAM_BASE_URL, ADMIN_PASSWORD as _ADMIN_PASSWORD
+from config import UPSTREAM_BASE_URL, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD
 from key_manager import key_manager
 from proxy import proxy_request
 
@@ -23,7 +23,19 @@ app = FastAPI(title="GrsaiProxyManager")
 # ── Session store (in-memory) ──────────────────────────────────────────────────
 _sessions: set = set()
 SESSION_COOKIE = "admin_session"
-ADMIN_PASSWORD = _ADMIN_PASSWORD
+# 运行时密码哈希（支持热更新）
+_pw_hash = ADMIN_PASSWORD_HASH.encode() if ADMIN_PASSWORD_HASH else b""
+
+
+def _verify_password(pwd: str) -> bool:
+    """验证密码，优先使用 bcrypt 哈希，兼容旧版明文。"""
+    if _pw_hash:
+        try:
+            return bcrypt.checkpw(pwd.encode(), _pw_hash)
+        except Exception:
+            return False
+    # 兼容旧版明文
+    return bool(ADMIN_PASSWORD) and pwd == ADMIN_PASSWORD
 
 
 def _check_auth(request: Request) -> bool:
@@ -77,7 +89,7 @@ class ChangePasswordRequest(BaseModel):
 
 @app.post("/admin/login")
 async def admin_login(body: LoginRequest):
-    if body.password == ADMIN_PASSWORD:
+    if _verify_password(body.password):
         token = secrets.token_hex(32)
         _sessions.add(token)
         resp = JSONResponse({"ok": True})
@@ -95,22 +107,29 @@ async def admin_login(body: LoginRequest):
 async def admin_change_password(body: ChangePasswordRequest, request: Request):
     if not _check_auth(request):
         return JSONResponse({"ok": False, "msg": "未登录"}, status_code=401)
-    global ADMIN_PASSWORD
-    if body.old_password != ADMIN_PASSWORD:
+    global _pw_hash
+    if not _verify_password(body.old_password):
         return JSONResponse({"ok": False, "msg": "原密码错误"}, status_code=400)
     if len(body.new_password) < 6:
         return JSONResponse({"ok": False, "msg": "新密码至少6位"}, status_code=400)
-    ADMIN_PASSWORD = body.new_password
+    new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt())
+    _pw_hash = new_hash
     # 同步写入 .env
     try:
         env_path = ".env"
         lines = open(env_path, encoding="utf-8").readlines()
         with open(env_path, "w", encoding="utf-8") as f:
+            written = False
             for line in lines:
-                if line.startswith("ADMIN_PASSWORD="):
-                    f.write(f"ADMIN_PASSWORD={body.new_password}\n")
+                if line.startswith("ADMIN_PASSWORD_HASH="):
+                    f.write(f"ADMIN_PASSWORD_HASH={new_hash.decode()}\n")
+                    written = True
+                elif line.startswith("ADMIN_PASSWORD="):
+                    pass  # 删除旧明文
                 else:
                     f.write(line)
+            if not written:
+                f.write(f"ADMIN_PASSWORD_HASH={new_hash.decode()}\n")
     except Exception as e:
         pass
     return JSONResponse({"ok": True})
@@ -133,7 +152,7 @@ async def admin_check(request: Request):
 
 @app.post("/admin/verify-key")
 async def verify_api_key(body: LoginRequest):
-    if body.password == ADMIN_PASSWORD:
+    if _verify_password(body.password):
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "msg": "API Key 错误"}, status_code=401)
 
@@ -141,7 +160,7 @@ async def verify_api_key(body: LoginRequest):
 @app.post("/admin/credits-summary")
 async def credits_summary(body: LoginRequest):
     """验证密码后返回总积分，供画图界面使用"""
-    if body.password != ADMIN_PASSWORD:
+    if not _verify_password(body.password):
         return JSONResponse({"ok": False}, status_code=401)
     total = sum(e["credits"] for e in key_manager.keys if e.get("active"))
     active = sum(1 for e in key_manager.keys if e.get("active"))
