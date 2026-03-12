@@ -45,7 +45,6 @@ uvicorn main:app --port 1515
 ```bash
 git clone https://github.com/lqhxxihx/GrsaiProxyManager.git
 cd GrsaiProxyManager
-# 编辑 .env
 docker compose up -d
 ```
 
@@ -54,6 +53,16 @@ docker compose up -d
 ```bash
 docker build -t grsai-proxy .
 docker run -d -p 1515:1515 --env-file .env --name grsai-proxy grsai-proxy
+```
+
+## 更新
+
+```bash
+git pull
+# 直接运行
+uvicorn main:app --port 1515
+# Docker
+docker compose up -d --build
 ```
 
 ## 访问地址
