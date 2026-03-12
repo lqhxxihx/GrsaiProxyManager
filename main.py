@@ -114,22 +114,10 @@ async def admin_change_password(body: ChangePasswordRequest, request: Request):
         return JSONResponse({"ok": False, "msg": "新密码至少6位"}, status_code=400)
     new_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt())
     _pw_hash = new_hash
-    # 同步写入 .env
+    # 写入 .password 文件
     try:
-        env_path = ".env"
-        lines = open(env_path, encoding="utf-8").readlines()
-        with open(env_path, "w", encoding="utf-8") as f:
-            written = False
-            for line in lines:
-                if line.startswith("ADMIN_PASSWORD_HASH="):
-                    f.write(f"ADMIN_PASSWORD_HASH={new_hash.decode()}\n")
-                    written = True
-                elif line.startswith("ADMIN_PASSWORD="):
-                    pass  # 删除旧明文
-                else:
-                    f.write(line)
-            if not written:
-                f.write(f"ADMIN_PASSWORD_HASH={new_hash.decode()}\n")
+        with open(".password", "w", encoding="utf-8") as f:
+            f.write(new_hash.decode())
     except Exception as e:
         pass
     return JSONResponse({"ok": True})

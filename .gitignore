@@ -1,6 +1,9 @@
 # 环境变量（含真实 API Keys，绝对不能提交）
 .env
 
+# 密码文件
+.password
+
 # 积分缓存（含运行时状态，不需要提交）
 keys_cache.json
 
