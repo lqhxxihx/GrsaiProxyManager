@@ -115,7 +115,7 @@ GrsaiProxyManager/
 │   └── admin/           # 管理界面
 │       ├── index.html
 │       └── login.html
-├── .env.example         # 环境变量示例
+├── .env                 # 环境变量配置
 ├── requirements.txt
 └── README.md
 ```
@@ -124,17 +124,11 @@ GrsaiProxyManager/
 
 | 模型 | 积分/次 |
 |------|--------|
+| nano-banana-pro | 1800 |
+| nano-banana-2 | 1300 |
+| nano-banana-pro-vt | 1800 |
 | nano-banana-fast | 440 |
 | nano-banana | 1400 |
-| nano-banana-2 | 1300 |
-| nano-banana-pro | 1800 |
-| nano-banana-pro-vt | 1800 |
-| nano-banana-pro-cl | 3400 |
-| nano-banana-pro-vip | 7000 |
-| nano-banana-pro-4k-vip | 8600 |
-| sora-image / gpt-image-1.5 | 400 |
-| sora-create-character / sora-upload-character | 200 |
-| gemini-* | 按 token 计算 |
 
 ## License
 
