@@ -30,15 +30,9 @@ cd GrsaiProxyManager
 pip install -r requirements.txt
 ```
 
-#### 3. 配置环境变量
-
-```bash
-# 编辑 .env，填入真实的 GRSAI_API_KEYS
-```
-
 > **默认密码**：`admin123456`，首次部署后请立即修改
 
-#### 4. 启动服务
+#### 3. 启动服务
 
 ```bash
 uvicorn main:app --port 1515
