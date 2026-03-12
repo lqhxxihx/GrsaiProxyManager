@@ -91,7 +91,7 @@ async def proxy_request(request: Request, path: str) -> Response:
     forward_headers["authorization"] = f"Bearer {selected_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             upstream_resp = await client.request(
                 method=request.method,
                 url=target_url,
