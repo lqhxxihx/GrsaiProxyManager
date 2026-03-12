@@ -33,8 +33,7 @@ pip install -r requirements.txt
 #### 3. 配置环境变量
 
 ```bash
-cp .env.example .env
-# 编辑 .env，填入真实的 API Key 和管理员密码哈希
+# 编辑 .env，填入真实的 GRSAI_API_KEYS
 ```
 
 生成 bcrypt 密码哈希：
@@ -42,6 +41,14 @@ cp .env.example .env
 ```bash
 python -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt()).decode())"
 ```
+
+将生成的哈希写入 `.password` 文件：
+
+```bash
+echo '$2b$12$xxx...' > .password
+```
+
+> **默认密码**：`admin123456`（`.password` 文件中已预置，首次部署后请立即修改）
 
 #### 4. 启动服务
 
@@ -56,7 +63,6 @@ uvicorn main:app --port 1515
 ```bash
 git clone https://github.com/lqhxxihx/GrsaiProxyManager.git
 cd GrsaiProxyManager
-cp .env.example .env
 # 编辑 .env
 docker compose up -d
 ```
