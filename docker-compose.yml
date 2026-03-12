@@ -8,3 +8,8 @@ services:
       - ./keys_cache.json:/app/keys_cache.json
       - ./.password:/app/.password
     restart: unless-stopped
+
+# 使用前请确保以下文件存在于项目根目录：
+# - .env (已包含在仓库中)
+# - keys_cache.json (首次运行自动创建)
+# - .password (首次运行自动创建)
