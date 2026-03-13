@@ -91,6 +91,12 @@ async def proxy_request(request: Request, path: str) -> Response:
     body = await request.body()
     body = _patch_gemini_request(body, path)
     model = _get_model_from_request(body)
+    # 对 Gemini 接口，从 path 中提取模型名
+    if not model and ('generateContent' in path or 'streamGenerateContent' in path):
+        import re
+        m = re.search(r'/models/([^/:]+)', path)
+        if m:
+            model = m.group(1)
     cost = get_model_cost(model)
 
     selected_key = key_manager.get_next_key(cost=cost)
@@ -125,6 +131,8 @@ async def proxy_request(request: Request, path: str) -> Response:
 
     # Gemini SSE requests: stream response directly
     if is_gemini_sse:
+        logger.info("Gemini request headers: %s", dict(forward_headers))
+        logger.info("Gemini request body: %s", body[:200])
         async def stream_gemini():
             try:
                 async with httpx.AsyncClient(timeout=180) as client:
