@@ -63,26 +63,8 @@ def _check_draw_succeeded(content: bytes, content_type: str) -> bool:
 
 
 def _patch_gemini_request(body: bytes, path: str) -> bytes:
-    """For Gemini generateContent requests, inject generationConfig if missing."""
-    if 'generateContent' not in path and 'streamGenerateContent' not in path:
-        return body
-    try:
-        data = json.loads(body)
-        if 'generationConfig' not in data:
-            # 检查是否包含绘图关键词，决定是否注入 IMAGE 模式
-            text = ''
-            for c in data.get('contents', []):
-                for p in c.get('parts', []):
-                    text += p.get('text', '')
-            draw_keywords = ['画', '绘', '生成图', '图片', 'draw', 'paint', 'image', 'generate', 'photo', 'picture', 'illustration']
-            is_draw = any(k.lower() in text.lower() for k in draw_keywords)
-            if is_draw:
-                data['generationConfig'] = {'responseModalities': ['IMAGE', 'TEXT']}
-            else:
-                data['generationConfig'] = {'responseModalities': ['TEXT']}
-        return json.dumps(data).encode()
-    except Exception:
-        return body
+    """Pass through as-is - let upstream handle generationConfig."""
+    return body
 
 
 def _clean_gemini_sse(content: bytes) -> bytes:
