@@ -140,6 +140,7 @@ async def proxy_request(request: Request, path: str) -> Response:
         forward_headers["content-length"] = str(len(body))
 
     is_gemini_sse = ('generateContent' in path or 'streamGenerateContent' in path)
+    response_headers = {}
 
     # Gemini SSE requests: stream response directly
     if is_gemini_sse:
@@ -154,20 +155,14 @@ async def proxy_request(request: Request, path: str) -> Response:
                         headers=forward_headers,
                         content=body,
                     ) as resp:
-                        import json as _json
-                        async for line in resp.aiter_lines():
-                            if line.startswith('data:') and 'sdkHttpResponse' in line:
-                                try:
-                                    prefix = 'data: '
-                                    json_str = line[len(prefix):].strip()
-                                    if json_str and json_str != '[DONE]':
-                                        obj = _json.loads(json_str)
-                                        obj.pop('sdkHttpResponse', None)
-                                        line = prefix + _json.dumps(obj, ensure_ascii=False)
-                                except Exception:
-                                    pass
-                            if line:  # skip empty lines, will add back
-                                yield (line + '\n\n').encode('utf-8')
+                        # 透传上游响应头
+                        nonlocal response_headers
+                        response_headers = {
+                            k: v for k, v in resp.headers.items()
+                            if k.lower() not in _HOP_BY_HOP
+                        }
+                        async for chunk in resp.aiter_bytes():
+                            yield chunk
             except Exception as exc:
                 logger.error("Gemini stream error: %s", repr(exc))
                 yield b'data: {"error": "Stream failed"}\n\n'
