@@ -155,20 +155,57 @@ async def proxy_request(request: Request, path: str) -> Response:
                         headers=forward_headers,
                         content=body,
                     ) as resp:
-                        # 透传上游响应头
-                        nonlocal response_headers
-                        response_headers = {
-                            k: v for k, v in resp.headers.items()
-                            if k.lower() not in _HOP_BY_HOP
+                        # 收集所有 SSE 事件，合并成完整 JSON
+                        all_parts = []
+                        model_version = ''
+                        response_id = ''
+                        usage_metadata = {}
+                        import json as _json
+                        async for line in resp.aiter_lines():
+                            if not line.startswith('data:'):
+                                continue
+                            json_str = line[5:].strip()
+                            if not json_str or json_str == '[DONE]':
+                                continue
+                            try:
+                                obj = _json.loads(json_str)
+                                obj.pop('sdkHttpResponse', None)
+                                if 'modelVersion' in obj:
+                                    model_version = obj['modelVersion']
+                                if 'responseId' in obj:
+                                    response_id = obj['responseId']
+                                if 'usageMetadata' in obj:
+                                    usage_metadata = obj['usageMetadata']
+                                candidates = obj.get('candidates', [])
+                                for cand in candidates:
+                                    parts = cand.get('content', {}).get('parts', [])
+                                    for part in parts:
+                                        if part:  # collect non-empty parts
+                                            all_parts.append(part)
+                            except Exception:
+                                pass
+                        # Build final response
+                        final = {
+                            'candidates': [{
+                                'content': {
+                                    'role': 'model',
+                                    'parts': all_parts
+                                },
+                                'finishReason': 'STOP'
+                            }],
+                            'modelVersion': model_version,
                         }
-                        async for chunk in resp.aiter_bytes():
-                            yield chunk
+                        if response_id:
+                            final['responseId'] = response_id
+                        if usage_metadata:
+                            final['usageMetadata'] = usage_metadata
+                        yield _json.dumps(final, ensure_ascii=False).encode('utf-8')
             except Exception as exc:
                 logger.error("Gemini stream error: %s", repr(exc))
-                yield b'data: {"error": "Stream failed"}\n\n'
+                yield b'{"error": "Stream failed"}'
         logger.info("%s /%s model=%s (gemini stream, key ...%s)",
                     request.method, path, model or "-", selected_key[-6:])
-        return StreamingResponse(stream_gemini(), media_type="text/event-stream")
+        return StreamingResponse(stream_gemini(), media_type="application/json")
 
     try:
         async with httpx.AsyncClient(timeout=180) as client:
