@@ -69,7 +69,17 @@ def _patch_gemini_request(body: bytes, path: str) -> bytes:
     try:
         data = json.loads(body)
         if 'generationConfig' not in data:
-            data['generationConfig'] = {'responseModalities': ['IMAGE', 'TEXT']}
+            # 检查是否包含绘图关键词，决定是否注入 IMAGE 模式
+            text = ''
+            for c in data.get('contents', []):
+                for p in c.get('parts', []):
+                    text += p.get('text', '')
+            draw_keywords = ['画', '绘', '生成图', '图片', 'draw', 'paint', 'image', 'generate', 'photo', 'picture', 'illustration']
+            is_draw = any(k.lower() in text.lower() for k in draw_keywords)
+            if is_draw:
+                data['generationConfig'] = {'responseModalities': ['IMAGE', 'TEXT']}
+            else:
+                data['generationConfig'] = {'responseModalities': ['TEXT']}
         return json.dumps(data).encode()
     except Exception:
         return body
