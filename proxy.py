@@ -302,7 +302,9 @@ def _map_gemini_official_request(path: str, body: bytes) -> Tuple[str, bytes, bo
     Returns (new_path, new_body, is_gemini_official, is_stream, model).
     """
     import re
-    m = re.match(r"^v1beta/models/([^/:]+):(generateContent|streamGenerateContent)$", path)
+    # handle URL-encoded colon in path (e.g. ...%3AstreamGenerateContent)
+    norm_path = path.replace("%3A", ":").replace("%3a", ":")
+    m = re.match(r"^v1beta/models/([^/:]+):(generateContent|streamGenerateContent)$", norm_path)
     if not m:
         return path, body, False, False, ""
     model = m.group(1)
@@ -524,7 +526,25 @@ async def proxy_request(request: Request, path: str) -> Response:
     if query:
         target_url = f"{target_url}?{query}"
     # Log draw request params (model/prompt/size/ratio)
-    # no extra draw-params logging
+    if path.startswith("v1/draw/"):
+        try:
+            _d = json.loads(body or b"{}")
+            urls = _d.get("urls") or []
+            def _brief(u):
+                if not isinstance(u, str):
+                    return "<non-string>"
+                return (u[:120] + "...") if len(u) > 120 else u
+            _log = {
+                "model": _d.get("model"),
+                "aspectRatio": _d.get("aspectRatio"),
+                "imageSize": _d.get("imageSize"),
+                "urls_count": len(urls),
+                "urls_sample": [_brief(u) for u in urls[:2]],
+                "prompt": (_d.get("prompt") or "")[:200],
+            }
+            logger.info("Draw 请求参数: %s", _log)
+        except Exception:
+            logger.info("Draw 请求参数: <unreadable>")
 
     # Filter and rebuild headers
     forward_headers = {
