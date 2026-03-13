@@ -580,6 +580,15 @@ async def proxy_request(request: Request, path: str) -> Response:
                         headers=forward_headers,
                         content=body,
                     ) as resp:
+                        ct = resp.headers.get("content-type", "")
+                        # If upstream is not SSE, read full body and convert once
+                        if "text/event-stream" not in ct:
+                            content = await resp.aread()
+                            final_bytes = await _convert_draw_to_gemini_async(
+                                content, ct, True
+                            )
+                            yield final_bytes.decode("utf-8", errors="ignore")
+                            return
                         async for line in resp.aiter_lines():
                             if not line.startswith("data:"):
                                 continue
