@@ -105,6 +105,9 @@ async def proxy_request(request: Request, path: str) -> Response:
     forward_headers["authorization"] = f"Bearer {selected_key}"
     # 移除 Accept-Encoding，让上游返回未压缩数据，避免代理转发压缩内容时丢失 Content-Encoding
     forward_headers.pop("accept-encoding", None)
+    # 更新 Content-Length（body 可能被 _patch_gemini_request 修改过）
+    if "content-length" in forward_headers:
+        forward_headers["content-length"] = str(len(body))
 
     try:
         async with httpx.AsyncClient(timeout=180) as client:
