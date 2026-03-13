@@ -546,6 +546,61 @@ async def proxy_request(request: Request, path: str) -> Response:
     # Support Gemini official API key header format as well
     if is_gemini_sse:
         forward_headers["x-goog-api-key"] = selected_key
+
+    # Gemini official streaming (mapped to draw) - stream & convert to Gemini SSE
+    if is_gemini_official and gemini_stream:
+        async def stream_gemini_from_draw():
+            last_progress = -1
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    async with client.stream(
+                        method=request.method,
+                        url=target_url,
+                        headers=forward_headers,
+                        content=body,
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if not payload or payload == "[DONE]":
+                                continue
+                            try:
+                                evt = json.loads(payload)
+                            except Exception:
+                                continue
+                            # progress updates
+                            progress = evt.get("progress")
+                            status = evt.get("status")
+                            if isinstance(progress, int):
+                                if progress == last_progress:
+                                    continue
+                                # throttle to reduce spam
+                                if last_progress >= 0 and progress - last_progress < 10 and progress < 100:
+                                    continue
+                                last_progress = progress
+                                gem = {
+                                    "candidates": [{
+                                        "content": {"role": "model", "parts": [{"text": f"progress: {progress}%"}]},
+                                        "index": 0
+                                    }]
+                                }
+                                yield f"data: {json.dumps(gem, ensure_ascii=False)}\n\n"
+                                continue
+                            # final success/fail
+                            if status == "succeeded" or status == "failed" or evt.get("error"):
+                                final_bytes = await _convert_draw_to_gemini_async(
+                                    json.dumps(evt, ensure_ascii=False).encode(),
+                                    "application/json",
+                                    True
+                                )
+                                yield final_bytes.decode("utf-8", errors="ignore")
+                                break
+            except Exception as exc:
+                logger.error("Gemini mapped stream error: %s", repr(exc))
+                yield 'data: {"error": "Stream failed"}\n\n'
+
+        return StreamingResponse(stream_gemini_from_draw(), media_type="text/event-stream")
     response_headers = {}
 
     # Gemini SSE requests: stream response directly
