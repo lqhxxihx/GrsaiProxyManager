@@ -89,6 +89,8 @@ async def proxy_request(request: Request, path: str) -> Response:
         if k.lower() not in _HOP_BY_HOP
     }
     forward_headers["authorization"] = f"Bearer {selected_key}"
+    # 移除 Accept-Encoding，让上游返回未压缩数据，避免代理转发压缩内容时丢失 Content-Encoding
+    forward_headers.pop("accept-encoding", None)
 
     try:
         async with httpx.AsyncClient(timeout=180) as client:
