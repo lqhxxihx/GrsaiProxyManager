@@ -571,6 +571,7 @@ async def proxy_request(request: Request, path: str) -> Response:
     if is_gemini_official and gemini_stream:
         async def stream_gemini_from_draw():
             last_progress = -1
+            last_ping = time.time()
             try:
                 async with httpx.AsyncClient(timeout=180) as client:
                     async with client.stream(
@@ -592,23 +593,17 @@ async def proxy_request(request: Request, path: str) -> Response:
                             # progress updates
                             progress = evt.get("progress")
                             status = evt.get("status")
+                            has_results = isinstance(evt.get("results"), list) and len(evt.get("results")) > 0
+                            has_error = bool(evt.get("error"))
                             if isinstance(progress, int):
-                                if progress == last_progress:
-                                    continue
-                                # throttle to reduce spam
-                                if last_progress >= 0 and progress - last_progress < 10 and progress < 100:
-                                    continue
-                                last_progress = progress
-                                gem = {
-                                    "candidates": [{
-                                        "content": {"role": "model", "parts": [{"text": f"progress: {progress}%"}]},
-                                        "index": 0
-                                    }]
-                                }
-                                yield f"data: {json.dumps(gem, ensure_ascii=False)}\n\n"
-                                continue
+                                # keep-alive ping (don't show progress in UI)
+                                if progress != last_progress and (progress == 100 or progress - last_progress >= 10):
+                                    last_progress = progress
+                                if time.time() - last_ping > 5:
+                                    last_ping = time.time()
+                                    yield ":\n\n"
                             # final success/fail
-                            if status == "succeeded" or status == "failed" or evt.get("error"):
+                            if status in ("succeeded", "failed") or has_results or has_error:
                                 final_bytes = await _convert_draw_to_gemini_async(
                                     json.dumps(evt, ensure_ascii=False).encode(),
                                     "application/json",
