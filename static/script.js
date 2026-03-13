@@ -267,20 +267,30 @@ function spawnGenerationCard(reqData) {
       dlBtn.addEventListener('click', () => downloadImage(url, reqData.prompt));
       regenBtn.addEventListener('click', () => spawnGenerationCard(reqData));
 
-      // persist to server
-      fetch('/api/save-image', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url, prompt: reqData.prompt, model: reqData.model})
-      }).then(r => r.json()).then(data => {
-        if (data.local_url) {
-          // update img src to local URL
-          const imgEl = card.querySelector('.result-img');
-          if (imgEl) imgEl.src = data.local_url;
-          card.dataset.itemId = data.id;
-          card.dataset.serverId = data.id;
-        }
-      }).catch(() => {});
+      // persist
+      const expiry = getExpiryMs();
+      const expTs = expiry === -1 ? -1 : Date.now() + expiry;
+      const id = 'nb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      card.dataset.itemId = id;
+      if (expiry === -1) {
+        // 永久：保存到服务器
+        fetch('/api/save-image', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url, prompt: reqData.prompt, model: reqData.model})
+        }).then(r => r.json()).then(data => {
+          if (data.local_url) {
+            const imgEl = card.querySelector('.result-img');
+            if (imgEl) imgEl.src = data.local_url;
+            card.dataset.serverId = data.id;
+          }
+        }).catch(() => {});
+      } else {
+        // 1小时/2小时：只存 localStorage
+        saveItem({id, url, prompt: reqData.prompt, model: reqData.model,
+          aspectRatio: reqData.aspectRatio, imageSize: reqData.imageSize,
+          urls: reqData.urls, timestamp: Date.now(), expiry: expTs});
+      }
     },
     onError(msg) {
       // replace overlay with error state
