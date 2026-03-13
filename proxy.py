@@ -75,6 +75,26 @@ def _patch_gemini_request(body: bytes, path: str) -> bytes:
         return body
 
 
+def _clean_gemini_sse(content: bytes) -> bytes:
+    """Remove sdkHttpResponse field from Gemini SSE response lines."""
+    lines = content.decode('utf-8', errors='replace').splitlines(keepends=True)
+    cleaned = []
+    for line in lines:
+        if line.startswith('data:') and 'sdkHttpResponse' in line:
+            try:
+                prefix = 'data: '
+                json_str = line[len(prefix):].strip()
+                if json_str and json_str != '[DONE]':
+                    obj = json.loads(json_str)
+                    obj.pop('sdkHttpResponse', None)
+                    cleaned.append(prefix + json.dumps(obj, ensure_ascii=False) + '\n')
+                    continue
+            except Exception:
+                pass
+        cleaned.append(line)
+    return ''.join(cleaned).encode('utf-8')
+
+
 async def proxy_request(request: Request, path: str) -> Response:
     body = await request.body()
     body = _patch_gemini_request(body, path)
@@ -148,6 +168,11 @@ async def proxy_request(request: Request, path: str) -> Response:
         if k.lower() not in _HOP_BY_HOP
     }
 
+    content = upstream_resp.content
+    # 清理 Gemini 响应中的 sdkHttpResponse 字段
+    if 'generateContent' in path or 'streamGenerateContent' in path:
+        content = _clean_gemini_sse(content)
+
     logger.info(
         "%s /%s model=%s cost=%d -> %d (key ...%s)",
         request.method,
@@ -159,7 +184,7 @@ async def proxy_request(request: Request, path: str) -> Response:
     )
 
     return Response(
-        content=upstream_resp.content,
+        content=content,
         status_code=upstream_resp.status_code,
         headers=response_headers,
         media_type=upstream_resp.headers.get("content-type"),
