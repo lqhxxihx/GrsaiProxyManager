@@ -146,16 +146,15 @@ class KeyManager:
         await asyncio.gather(*[self.refresh_credits(e["key"]) for e in self.keys], return_exceptions=True)
 
     def start_background_refresh(self) -> None:
-        """Launch a background asyncio task that refreshes credits periodically."""
-        asyncio.create_task(self._background_loop())
+        """Refresh credits once for keys that have never been checked."""
+        asyncio.create_task(self._initial_refresh())
 
-    async def _background_loop(self) -> None:
-        logger.info("Background: initial credits refresh...")
-        await self.refresh_all_credits()
-        while True:
-            await asyncio.sleep(CREDITS_REFRESH_INTERVAL)
-            logger.info("Background: refreshing all key credits...")
-            await self.refresh_all_credits()
+    async def _initial_refresh(self) -> None:
+        logger.info("Background: refreshing unchecked key credits...")
+        targets = [e["key"] for e in self.keys if e.get("last_checked") is None]
+        if not targets:
+            return
+        await asyncio.gather(*[self.refresh_credits(k) for k in targets], return_exceptions=True)
 
     def list_keys(self) -> list:
         """Return a sanitised view of all keys (masked) for the admin endpoint."""
