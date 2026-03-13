@@ -375,12 +375,35 @@ function batchDelete(list, label) {
 
 function deleteByCredits() {
   var maxVal = parseFloat(document.getElementById('filterCredits').value);
-  if (isNaN(maxVal)) { showToast('\u8bf7\u8f93\u5165\u79ef\u5206\u9608\u5024', 'error'); return; }
-  var list = [];
-  for (var i = 0; i < keysData.length; i++) {
-    if ((keysData[i].credits || 0) <= maxVal) list.push(keysData[i]);
-  }
-  batchDelete(list, '\u79ef\u5206 \u2264 ' + maxVal);
+  if (isNaN(maxVal)) { showToast('请输入积分阈值', 'error'); return; }
+  showToast('正在刷新积分，请稍候...', 'success');
+  apiFetch('/admin/keys/refresh', {method: 'POST'})
+    .then(function(data) {
+      keysData = data.keys || [];
+      renderStats();
+      renderTable();
+      var toDelete = keysData.filter(function(k) { return (k.credits || 0) <= maxVal; });
+      var toKeep = keysData.filter(function(k) { return (k.credits || 0) > maxVal; });
+      if (toKeep.length > 0 && toDelete.length === 0) {
+        showToast(toKeep.length + ' 个 Key 积分均超过阈值，已更新显示', 'success');
+        return;
+      }
+      if (!toDelete.length) {
+        showToast('刷新后无积分 ≤ ' + maxVal + ' 的 Key', 'success');
+        return;
+      }
+      if (!confirm('刷新后确认删除 ' + toDelete.length + ' 个积分 ≤ ' + maxVal + ' 的 Key？')) return;
+      var done = 0;
+      function next(idx) {
+        if (idx >= toDelete.length) { showToast('已删除 ' + done + ' 个 Key', 'success'); loadKeys(); return; }
+        var hint = toDelete[idx].key_hint || '';
+        apiFetch('/admin/keys/' + encodeURIComponent(hint), {method: 'DELETE'})
+          .then(function(d) { if (d.deleted > 0) done++; next(idx + 1); })
+          .catch(function() { next(idx + 1); });
+      }
+      next(0);
+    })
+    .catch(function(e) { showToast('刷新失败: ' + e.message, 'error'); });
 }
 
 function deleteByStatus() {
