@@ -1,10 +1,10 @@
 import json
 import logging
-from typing import Set
+from typing import AsyncIterator, Set
 
 import httpx
 from fastapi import Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from config import UPSTREAM_BASE_URL
 from key_manager import key_manager
@@ -138,6 +138,39 @@ async def proxy_request(request: Request, path: str) -> Response:
     # 更新 Content-Length（body 可能被 _patch_gemini_request 修改过）
     if "content-length" in forward_headers:
         forward_headers["content-length"] = str(len(body))
+
+    is_gemini_sse = ('generateContent' in path or 'streamGenerateContent' in path)
+
+    # Gemini SSE requests: stream response directly
+    if is_gemini_sse:
+        async def stream_gemini():
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    async with client.stream(
+                        method=request.method,
+                        url=target_url,
+                        headers=forward_headers,
+                        content=body,
+                    ) as resp:
+                        async for line in resp.aiter_lines():
+                            if line.startswith('data:') and 'sdkHttpResponse' in line:
+                                try:
+                                    import json as _json
+                                    prefix = 'data: '
+                                    json_str = line[len(prefix):].strip()
+                                    if json_str and json_str != '[DONE]':
+                                        obj = _json.loads(json_str)
+                                        obj.pop('sdkHttpResponse', None)
+                                        line = prefix + _json.dumps(obj, ensure_ascii=False)
+                                except Exception:
+                                    pass
+                            yield line + '\n\n'
+            except Exception as exc:
+                logger.error("Gemini stream error: %s", repr(exc))
+                yield 'data: {"error": "Stream failed"}\n\n'
+        logger.info("%s /%s model=%s (gemini stream, key ...%s)",
+                    request.method, path, model or "-", selected_key[-6:])
+        return StreamingResponse(stream_gemini(), media_type="text/event-stream")
 
     try:
         async with httpx.AsyncClient(timeout=180) as client:
