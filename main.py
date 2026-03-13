@@ -8,6 +8,7 @@ from typing import List
 import bcrypt
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -40,6 +41,15 @@ def _save_index(items: list) -> None:
         json.dump(items, f, ensure_ascii=False)
 
 app = FastAPI(title="GrsaiProxyManager")
+
+# CORS: allow Cherry Studio (and other clients) to call API directly
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Session store (in-memory) ──────────────────────────────────────────────────
 _sessions: set = set()
