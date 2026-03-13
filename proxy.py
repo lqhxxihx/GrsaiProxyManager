@@ -154,15 +154,8 @@ async def proxy_request(request: Request, path: str) -> Response:
                         headers=forward_headers,
                         content=body,
                     ) as resp:
-                        buffer = b""
-                        async for chunk in resp.aiter_bytes():
-                            buffer += chunk
-                        # Process complete buffer - remove sdkHttpResponse
-                        import re as _re
                         import json as _json
-                        lines = buffer.decode('utf-8', errors='replace').split('\n')
-                        result = []
-                        for line in lines:
+                        async for line in resp.aiter_lines():
                             if line.startswith('data:') and 'sdkHttpResponse' in line:
                                 try:
                                     prefix = 'data: '
@@ -173,8 +166,8 @@ async def proxy_request(request: Request, path: str) -> Response:
                                         line = prefix + _json.dumps(obj, ensure_ascii=False)
                                 except Exception:
                                     pass
-                            result.append(line)
-                        yield '\n'.join(result).encode('utf-8')
+                            if line:  # skip empty lines, will add back
+                                yield (line + '\n\n').encode('utf-8')
             except Exception as exc:
                 logger.error("Gemini stream error: %s", repr(exc))
                 yield b'data: {"error": "Stream failed"}\n\n'
