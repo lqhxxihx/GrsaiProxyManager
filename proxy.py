@@ -62,8 +62,22 @@ def _check_draw_succeeded(content: bytes, content_type: str) -> bool:
         return False
 
 
+def _patch_gemini_request(body: bytes, path: str) -> bytes:
+    """For Gemini generateContent requests, inject generationConfig if missing."""
+    if 'generateContent' not in path and 'streamGenerateContent' not in path:
+        return body
+    try:
+        data = json.loads(body)
+        if 'generationConfig' not in data:
+            data['generationConfig'] = {'responseModalities': ['IMAGE', 'TEXT']}
+        return json.dumps(data).encode()
+    except Exception:
+        return body
+
+
 async def proxy_request(request: Request, path: str) -> Response:
     body = await request.body()
+    body = _patch_gemini_request(body, path)
     model = _get_model_from_request(body)
     cost = get_model_cost(model)
 
