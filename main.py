@@ -1,5 +1,6 @@
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import secrets
 import uuid
@@ -18,10 +19,21 @@ from config import UPSTREAM_BASE_URL, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD
 from key_manager import key_manager
 from proxy import proxy_request
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+_log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=_log_format)
+
+# File logging for debugging in deployments
+_file_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, "app.log"),
+    maxBytes=5 * 1024 * 1024,
+    backupCount=2,
+    encoding="utf-8",
 )
+_file_handler.setFormatter(logging.Formatter(_log_format))
+logging.getLogger().addHandler(_file_handler)
 
 RESULTS_DIR = "results"
 RESULTS_INDEX = os.path.join(RESULTS_DIR, "index.json")

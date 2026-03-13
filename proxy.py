@@ -1,8 +1,11 @@
 import json
 import logging
 import time
+import asyncio
+import base64
 from typing import AsyncIterator, Set, Tuple, Optional, Dict, Any, List
 import re
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import httpx
 from fastapi import Request
@@ -100,6 +103,48 @@ def _clean_gemini_sse(content: bytes) -> bytes:
         cleaned.append(line)
     return ''.join(cleaned).encode('utf-8')
 
+def _gemini_keepalive_chunk() -> str:
+    # Minimal non-final chunk to keep SSE clients alive
+    return 'data: {"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"index":0}]}\n\n'
+
+
+def _gemini_error_chunk(message: str) -> str:
+    gem = {
+        "candidates": [{
+            "content": {"role": "model", "parts": [{"text": message}]},
+            "finishReason": "STOP",
+            "index": 0,
+        }]
+    }
+    return f"data: {json.dumps(gem, ensure_ascii=False)}\n\n" + "data: [DONE]\n\n"
+
+
+def _drop_alt_sse(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+        qs = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() != "alt"]
+        new_query = urlencode(qs)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    except Exception:
+        return url
+
+
+def _is_credit_error(obj: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    code = obj.get("code")
+    msg = str(obj.get("msg") or obj.get("error") or "")
+    low = msg.lower()
+    if code in (-1, 402):
+        return True
+    if "credits not enough" in low or "credit not enough" in low:
+        return True
+    if "credits" in low and "not" in low:
+        return True
+    if "积分" in msg and ("不足" in msg or "不够" in msg):
+        return True
+    return False
+
 
 def _extract_draw_overrides(prompt: str) -> Tuple[str, Optional[str], Optional[str]]:
     """
@@ -137,6 +182,17 @@ _ALLOWED_MODELS = {
     "nano-banana-fast",
     "nano-banana",
 }
+
+# Map Gemini official model names to grsai draw models
+_GEMINI_MODEL_ALIAS = {
+    "gemini-2.5-flash-image": "nano-banana-fast",
+}
+
+
+def _map_gemini_model_name(model: str) -> str:
+    if not model:
+        return model
+    return _GEMINI_MODEL_ALIAS.get(model, model)
 
 _ALLOWED_ASPECTS = {
     "auto",
@@ -307,18 +363,58 @@ def _map_gemini_official_request(path: str, body: bytes) -> Tuple[str, bytes, bo
     m = re.match(r"^v1beta/models/([^/:]+):(generateContent|streamGenerateContent)$", norm_path)
     if not m:
         return path, body, False, False, ""
-    model = m.group(1)
+    model = _map_gemini_model_name(m.group(1))
     is_stream = m.group(2) == "streamGenerateContent"
     try:
         data = json.loads(body or b"{}")
     except Exception:
         return path, body, True, is_stream, model
 
-    # Extract prompt text and inline images
-    prompt_parts = []
-    urls = []
-    md_img_re = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-    contents = data.get("contents") or []
+    def _strip_data_uri(data_str: str) -> str:
+        if not isinstance(data_str, str):
+            return data_str
+        if data_str.startswith("data:") and "base64," in data_str:
+            return data_str.split("base64,", 1)[1]
+        return data_str
+
+    def _extract_from_parts(parts: Any) -> Tuple[List[str], List[str]]:
+        prompt_parts: List[str] = []
+        urls: List[str] = []
+        if not isinstance(parts, list):
+            return prompt_parts, urls
+        md_img_re = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+        for p in parts:
+            text = None
+            if isinstance(p, str):
+                text = p
+            elif isinstance(p, dict):
+                if "text" in p and p["text"]:
+                    text = str(p["text"])
+                inline = p.get("inlineData")
+                if isinstance(inline, dict) and inline.get("data"):
+                    urls.append(_strip_data_uri(str(inline["data"])))
+                file_data = p.get("fileData")
+                if isinstance(file_data, dict) and file_data.get("fileUri"):
+                    urls.append(str(file_data["fileUri"]))
+                image_url = p.get("image_url") or p.get("imageUrl")
+                if isinstance(image_url, dict) and image_url.get("url"):
+                    urls.append(str(image_url["url"]))
+            if text:
+                for u in md_img_re.findall(text):
+                    if u:
+                        urls.append(u)
+                text = md_img_re.sub("", text)
+                text = "\n".join([ln for ln in text.splitlines() if ln.strip()])
+                if text:
+                    prompt_parts.append(text)
+        return prompt_parts, urls
+
+    contents = data.get("contents")
+    if isinstance(contents, dict):
+        contents = [contents]
+    if not isinstance(contents, list):
+        contents = []
+
     # Only use the last user message (or last item) for prompt & refs
     content = None
     for c in reversed(contents):
@@ -328,40 +424,34 @@ def _map_gemini_official_request(path: str, body: bytes) -> Tuple[str, bytes, bo
     if content is None and contents:
         content = contents[-1] if isinstance(contents[-1], dict) else None
 
+    prompt_parts: List[str] = []
+    urls: List[str] = []
+
+    system = data.get("systemInstruction")
+    if isinstance(system, dict):
+        sys_parts = system.get("parts")
+        sys_text, _ = _extract_from_parts(sys_parts)
+        if sys_text:
+            prompt_parts.append("\n".join(sys_text))
+
     if content:
         parts = content.get("parts") or []
-        for p in parts:
-            if isinstance(p, dict) and "text" in p and p["text"]:
-                # Only text goes into prompt; extract markdown images to urls
-                t = str(p["text"])
-                # extract markdown image urls
-                for m in md_img_re.findall(t):
-                    if m:
-                        urls.append(m)
-                # strip markdown images from prompt
-                t = md_img_re.sub("", t)
-                # drop empty lines after stripping
-                t = "\n".join([ln for ln in t.splitlines() if ln.strip()])
-                if t:
-                    prompt_parts.append(t)
-            if isinstance(p, dict):
-                inline = p.get("inlineData")
-                if isinstance(inline, dict) and inline.get("data"):
-                    # Reference image (base64)
-                    urls.append(inline["data"])
-                file_data = p.get("fileData")
-                if isinstance(file_data, dict) and file_data.get("fileUri"):
-                    # Reference image (URL)
-                    urls.append(file_data["fileUri"])
+        text_parts, ref_urls = _extract_from_parts(parts)
+        prompt_parts.extend(text_parts)
+        urls.extend(ref_urls)
 
-    merged_prompt = "\n".join(prompt_parts).strip()
+    merged_prompt = "\n".join([p for p in prompt_parts if p]).strip()
     merged_prompt, p_aspect, p_size = _extract_draw_overrides(merged_prompt)
+    if not merged_prompt:
+        merged_prompt = "image"
     payload = {
         "model": model,
         "prompt": merged_prompt,
     }
     # Map generationConfig -> draw params (best-effort)
     gc = data.get("generationConfig") or {}
+    if not isinstance(gc, dict):
+        gc = {}
     aspect = gc.get("aspectRatio") or data.get("aspectRatio") or p_aspect
     size = gc.get("imageSize") or data.get("imageSize") or p_size
     if aspect:
@@ -403,8 +493,23 @@ async def _convert_draw_to_gemini_async(content: bytes, content_type: str, is_st
     if not isinstance(data, dict):
         return content
 
+    if data.get("code") not in (None, 0):
+        msg = data.get("msg") or data.get("error") or "request failed"
+        gem = {
+            "candidates": [{
+                "content": {"role": "model", "parts": [{"text": msg}]},
+                "finishReason": "STOP",
+                "index": 0
+            }]
+        }
+        if is_stream:
+            return (f"data: {json.dumps(gem, ensure_ascii=False)}\n\n"
+                    f"data: [DONE]\n\n").encode("utf-8")
+        return json.dumps(gem, ensure_ascii=False).encode("utf-8")
+
     parts: List[Dict[str, Any]] = []
-    if data.get("status") == "succeeded" and isinstance(data.get("results"), list):
+    has_results = isinstance(data.get("results"), list) and len(data.get("results")) > 0
+    if has_results:
         # Prefer inlineData; if only URL present, try to fetch and embed
         async with httpx.AsyncClient(timeout=30) as client:
             for r in data["results"]:
@@ -436,8 +541,8 @@ async def _convert_draw_to_gemini_async(content: bytes, content_type: str, is_st
                         parts.append({"text": f"![image]({url})"})
 
     if not parts:
-        if data.get("status") == "failed" or data.get("error"):
-            msg = data.get("error") or data.get("message") or "image generation failed"
+        if data.get("status") == "failed" or data.get("error") or data.get("failure_reason"):
+            msg = data.get("error") or data.get("failure_reason") or data.get("message") or "image generation failed"
             gem = {
                 "candidates": [{
                     "content": {"role": "model", "parts": [{"text": msg}]},
@@ -469,6 +574,7 @@ async def proxy_request(request: Request, path: str) -> Response:
     # Map Gemini official endpoint to draw endpoint (best-effort)
     path, body, is_gemini_official, gemini_stream, gemini_model = _map_gemini_official_request(path, body)
     body = _patch_gemini_request(body, path)
+    # For Gemini official stream, prefer upstream SSE if available; do not force webhook
     # For native draw requests, parse prompt hints if aspectRatio/imageSize not provided
     if path.startswith("v1/draw/"):
         try:
@@ -503,7 +609,10 @@ async def proxy_request(request: Request, path: str) -> Response:
     # no extra model logging
     cost = get_model_cost(model)
 
-    selected_key = key_manager.get_next_key(cost=cost)
+    if cost > 0:
+        selected_key = await key_manager.reserve_key(cost=cost)
+    else:
+        selected_key = key_manager.get_next_key(cost=cost)
     if selected_key is None:
         # Refresh credits once and retry selection
         try:
@@ -511,7 +620,10 @@ async def proxy_request(request: Request, path: str) -> Response:
             await key_manager.refresh_all_credits()
         except Exception as exc:
             logger.warning("Credits refresh failed: %s", exc)
-        selected_key = key_manager.get_next_key(cost=cost)
+        if cost > 0:
+            selected_key = await key_manager.reserve_key(cost=cost)
+        else:
+            selected_key = key_manager.get_next_key(cost=cost)
     if selected_key is None:
         logger.error("No available API keys for model '%s' (cost=%d)", model, cost)
         return Response(
@@ -569,60 +681,365 @@ async def proxy_request(request: Request, path: str) -> Response:
 
     # Gemini official streaming (mapped to draw) - stream & convert to Gemini SSE
     if is_gemini_official and gemini_stream:
+        target_url_nostream = _drop_alt_sse(target_url)
+
+        async def poll_draw_result_once(client: httpx.AsyncClient, draw_id: str) -> Optional[dict]:
+            url = f"{UPSTREAM_BASE_URL}/v1/draw/result"
+            try:
+                poll_headers = dict(forward_headers)
+                poll_headers.pop("content-length", None)
+                poll_headers["content-type"] = "application/json"
+                resp = await client.post(url, headers=poll_headers, json={"id": draw_id})
+                return resp.json()
+            except Exception:
+                return None
+
         async def stream_gemini_from_draw():
-            last_progress = -1
-            last_ping = time.time()
+            refunded_keys: set[str] = set()
+            current_key = selected_key
+
+            async def _refund_key_once(key: Optional[str]):
+                if not key or cost <= 0:
+                    return
+                if key in refunded_keys:
+                    return
+                await key_manager.refund_credits(key, cost)
+                refunded_keys.add(key)
             try:
                 async with httpx.AsyncClient(timeout=180) as client:
-                    async with client.stream(
-                        method=request.method,
-                        url=target_url,
-                        headers=forward_headers,
-                        content=body,
-                    ) as resp:
-                        ct = resp.headers.get("content-type", "")
-                        # If upstream is not SSE, read full body and convert once
-                        if "text/event-stream" not in ct:
-                            content = await resp.aread()
-                            final_bytes = await _convert_draw_to_gemini_async(
-                                content, ct, True
-                            )
-                            yield final_bytes.decode("utf-8", errors="ignore")
+                    attempts = 0
+                    while attempts < 2:
+                        attempts += 1
+                        forward_headers["authorization"] = f"Bearer {current_key}"
+
+                        async def poll_and_send(draw_id: str, status_box: dict):
+                            end = time.time() + 300
+                            poll_count = 0
+                            last_progress = None
+                            stale_count = 0
+                            stalled = False
+                            last_emit = 0.0
+                            status_box["done"] = False
+                            status_box["stalled"] = False
+                            status_box["sent"] = False
+                            # initial keep-alive to open stream immediately
+                            yield _gemini_keepalive_chunk()
+                            last_emit = time.time()
+                            while time.time() < end:
+                                now = time.time()
+                                if now - last_emit >= 2:
+                                    yield _gemini_keepalive_chunk()
+                                    last_emit = now
+                                data = await poll_draw_result_once(client, draw_id)
+                                poll_count += 1
+                                if isinstance(data, dict):
+                                    d = data.get("data") if isinstance(data.get("data"), dict) else data
+                                    if not isinstance(d, dict):
+                                        d = {}
+                                    status = d.get("status")
+                                    progress = d.get("progress")
+                                    results = d.get("results") if isinstance(d.get("results"), list) else []
+                                    if poll_count == 1 or poll_count % 5 == 0:
+                                        logger.info(
+                                            "Draw poll #%d status=%s progress=%s has_results=%s code=%s msg=%s",
+                                            poll_count,
+                                            status,
+                                            progress,
+                                            bool(results),
+                                            data.get("code"),
+                                            str(data.get("msg") or d.get("error") or d.get("failure_reason") or ""),
+                                        )
+                                    if isinstance(progress, int):
+                                        if last_progress is None or progress != last_progress:
+                                            last_progress = progress
+                                            stale_count = 0
+                                        else:
+                                            stale_count += 1
+                                        if stale_count >= 20:
+                                            stalled = True
+                                            break
+                                    if status in ("succeeded", "failed") or results or d.get("error"):
+                                        first_url = ""
+                                        if results:
+                                            r0 = results[0] if isinstance(results[0], dict) else {}
+                                            first_url = r0.get("url") or ""
+                                        err_msg = str(d.get("error") or d.get("failure_reason") or "")
+                                        logger.info(
+                                            "Draw poll result status=%s has_results=%s results_count=%s first_url=%s error=%s",
+                                            status,
+                                            bool(results),
+                                            len(results),
+                                            first_url[:200],
+                                            err_msg[:200],
+                                        )
+                                        if status == "failed" or d.get("error") or d.get("failure_reason"):
+                                            await _refund_key_once(current_key)
+                                        final_bytes = await _convert_draw_to_gemini_async(
+                                            json.dumps(d, ensure_ascii=False).encode(),
+                                            "application/json",
+                                            True
+                                        )
+                                        yield final_bytes.decode("utf-8", errors="ignore")
+                                        status_box["sent"] = True
+                                        status_box["done"] = True
+                                        return
+                                await asyncio.sleep(2)
+                            if stalled:
+                                logger.info("Draw poll stalled, retrying with another key")
+                                await _refund_key_once(current_key)
+                                status_box["stalled"] = True
+                                return
+                            yield _gemini_error_chunk("draw result timeout")
+                            status_box["sent"] = True
+                            status_box["done"] = True
                             return
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data:"):
-                                continue
-                            payload = line[5:].strip()
-                            if not payload or payload == "[DONE]":
-                                continue
-                            try:
-                                evt = json.loads(payload)
-                            except Exception:
-                                continue
-                            # progress updates
-                            progress = evt.get("progress")
-                            status = evt.get("status")
-                            has_results = isinstance(evt.get("results"), list) and len(evt.get("results")) > 0
-                            has_error = bool(evt.get("error"))
-                            if isinstance(progress, int):
-                                # keep-alive ping (don't show progress in UI)
-                                if progress != last_progress and (progress == 100 or progress - last_progress >= 10):
-                                    last_progress = progress
-                                if time.time() - last_ping > 5:
-                                    last_ping = time.time()
-                                    yield ":\n\n"
-                            # final success/fail
-                            if status in ("succeeded", "failed") or has_results or has_error:
+                        async with client.stream(
+                            method=request.method,
+                            url=target_url,
+                            headers=forward_headers,
+                            content=body,
+                        ) as resp:
+                            ct = resp.headers.get("content-type", "")
+                            logger.info("Upstream content-type (stream): %s", ct or "<missing>")
+                            # If upstream is not SSE, read full body and convert once
+                            if "text/event-stream" not in ct:
+                                content = await resp.aread()
+                                logger.info("Upstream JSON len=%d sample=%s", len(content or b""), (content or b"")[:200])
+                                # Try parse id response and poll for result
+                                try:
+                                    obj = json.loads(content)
+                                except Exception:
+                                    obj = None
+                                if _is_credit_error(obj):
+                                    logger.info("Upstream credits not enough for key ...%s", current_key[-6:])
+                                    try:
+                                        await key_manager.refresh_credits(current_key)
+                                    except Exception:
+                                        pass
+                                    # refund current reserved key before retry
+                                    await _refund_key_once(current_key)
+                                    # retry with another key once
+                                    if attempts < 2:
+                                        new_key = await key_manager.reserve_key(cost=cost) if cost > 0 else key_manager.get_next_key(cost=cost)
+                                        if new_key:
+                                            logger.info("Retrying with another key ...%s", new_key[-6:])
+                                            current_key = new_key
+                                            continue
+                                    yield _gemini_error_chunk("apikey credits not enough")
+                                    return
+                                draw_id = None
+                                if isinstance(obj, dict):
+                                    if isinstance(obj.get("data"), dict):
+                                        draw_id = obj["data"].get("id")
+                                    draw_id = draw_id or obj.get("id")
+                                logger.info("Upstream draw_id: %s", draw_id or "<missing>")
+                                if draw_id:
+                                    status_box = {}
+                                    async for chunk in poll_and_send(draw_id, status_box):
+                                        yield chunk
+                                    if status_box.get("done"):
+                                        return
+                                    # stalled -> try another key
+                                    if status_box.get("stalled") and attempts < 2:
+                                        new_key = await key_manager.reserve_key(cost=cost) if cost > 0 else key_manager.get_next_key(cost=cost)
+                                        if new_key:
+                                            logger.info("Retrying with another key ...%s", new_key[-6:])
+                                            current_key = new_key
+                                            continue
+                                    if status_box.get("stalled"):
+                                        yield _gemini_error_chunk("draw result stalled")
+                                        return
+                                # fallback: convert whatever we got
                                 final_bytes = await _convert_draw_to_gemini_async(
-                                    json.dumps(evt, ensure_ascii=False).encode(),
-                                    "application/json",
-                                    True
+                                    content, ct, True
                                 )
                                 yield final_bytes.decode("utf-8", errors="ignore")
-                                break
+                                return
+                            aiter = resp.aiter_lines()
+                            last_emit = 0.0
+                            sent_content = False
+                            # initial keep-alive to open stream immediately
+                            yield _gemini_keepalive_chunk()
+                            last_emit = time.time()
+                            while True:
+                                try:
+                                    line = await asyncio.wait_for(aiter.__anext__(), timeout=1)
+                                except asyncio.TimeoutError:
+                                    # keep-alive ping
+                                    now = time.time()
+                                    if now - last_emit >= 2:
+                                        yield _gemini_keepalive_chunk()
+                                        last_emit = now
+                                    continue
+                                except StopAsyncIteration:
+                                    break
+                                if not line.startswith("data:"):
+                                    # Some upstreams send JSON without data: prefix
+                                    try:
+                                        raw = line.strip()
+                                        if raw.startswith('{'):
+                                            obj = json.loads(raw)
+                                            draw_id = None
+                                            if isinstance(obj, dict):
+                                                if isinstance(obj.get("data"), dict):
+                                                    draw_id = obj["data"].get("id")
+                                                draw_id = draw_id or obj.get("id")
+                                            if draw_id:
+                                                status_box = {}
+                                                async for chunk in poll_and_send(draw_id, status_box):
+                                                    yield chunk
+                                                if status_box.get("done"):
+                                                    return
+                                                # stalled -> try another key
+                                                if status_box.get("stalled") and attempts < 2:
+                                                    new_key = await key_manager.reserve_key(cost=cost) if cost > 0 else key_manager.get_next_key(cost=cost)
+                                                    if new_key:
+                                                        logger.info("Retrying with another key ...%s", new_key[-6:])
+                                                        current_key = new_key
+                                                        continue
+                                                if status_box.get("stalled"):
+                                                    yield _gemini_error_chunk("draw result stalled")
+                                                    return
+                                            # If this is already a result payload, convert it
+                                            if isinstance(obj, dict) and (obj.get('status') or obj.get('results') or obj.get('error')):
+                                                final_bytes = await _convert_draw_to_gemini_async(
+                                                    json.dumps(obj, ensure_ascii=False).encode(),
+                                                    'application/json',
+                                                    True
+                                                )
+                                                yield final_bytes.decode('utf-8', errors='ignore')
+                                                return
+                                    except Exception:
+                                        pass
+                                    continue
+                                payload = line[5:].strip()
+                                if not payload or payload == "[DONE]":
+                                    continue
+                                try:
+                                    evt = json.loads(payload)
+                                except Exception:
+                                    continue
+                                # detect draw id (some streams only return id)
+                                draw_id = None
+                                if isinstance(evt, dict):
+                                    if isinstance(evt.get("data"), dict) and evt["data"].get("id"):
+                                        draw_id = evt["data"].get("id")
+                                # some streams wrap payload in {"code":0,"data":{...}}
+                                if isinstance(evt, dict) and isinstance(evt.get("data"), dict):
+                                    evt = evt["data"]
+                                if isinstance(evt, dict) and evt.get("id"):
+                                    draw_id = draw_id or evt.get("id")
+                                if draw_id and not (isinstance(evt, dict) and (evt.get("status") or evt.get("results") or evt.get("error"))):
+                                    status_box = {}
+                                    async for chunk in poll_and_send(draw_id, status_box):
+                                        yield chunk
+                                    if status_box.get("done"):
+                                        return
+                                    # stalled -> try another key
+                                    if status_box.get("stalled") and attempts < 2:
+                                        new_key = await key_manager.reserve_key(cost=cost) if cost > 0 else key_manager.get_next_key(cost=cost)
+                                        if new_key:
+                                            logger.info("Retrying with another key ...%s", new_key[-6:])
+                                            current_key = new_key
+                                            continue
+                                    if status_box.get("stalled"):
+                                        yield _gemini_error_chunk("draw result stalled")
+                                        sent_content = True
+                                        return
+                                # progress updates
+                                progress = evt.get("progress")
+                                status = evt.get("status")
+                                has_results = isinstance(evt.get("results"), list) and len(evt.get("results")) > 0
+                                has_error = bool(evt.get("error"))
+                                if isinstance(progress, int):
+                                    # no progress output; keep-alive handled by timeout
+                                    now = time.time()
+                                    if now - last_emit >= 2:
+                                        yield _gemini_keepalive_chunk()
+                                        last_emit = now
+                                # final success/fail
+                                if status in ("succeeded", "failed") or has_results or has_error:
+                                    try:
+                                        results = evt.get("results") or []
+                                        first_url = ""
+                                        if isinstance(results, list) and results:
+                                            r0 = results[0] if isinstance(results[0], dict) else {}
+                                            first_url = r0.get("url") or ""
+                                        logger.info(
+                                            "Draw stream final status=%s has_results=%s results_count=%s first_url=%s error=%s",
+                                            status,
+                                            bool(results),
+                                            len(results) if isinstance(results, list) else 0,
+                                            first_url[:200],
+                                            str(evt.get("error") or evt.get("failure_reason") or ""),
+                                        )
+                                    except Exception:
+                                        pass
+                                    if status == "failed" or has_error:
+                                        await _refund_key_once(current_key)
+                                    final_bytes = await _convert_draw_to_gemini_async(
+                                        json.dumps(evt, ensure_ascii=False).encode(),
+                                        "application/json",
+                                        True
+                                    )
+                                    yield final_bytes.decode("utf-8", errors="ignore")
+                                    sent_content = True
+                                    break
+                            if not sent_content:
+                                # Fallback: retry without alt=sse to force JSON id then poll
+                                try:
+                                    fb_try = 0
+                                    while fb_try < 2:
+                                        fb_try += 1
+                                        fallback_headers = dict(forward_headers)
+                                        fallback_headers.pop("content-length", None)
+                                        fallback_headers["authorization"] = f"Bearer {current_key}"
+                                        resp2 = await client.post(target_url_nostream, headers=fallback_headers, content=body)
+                                        ct2 = resp2.headers.get("content-type", "")
+                                        content2 = await resp2.aread()
+                                        try:
+                                            obj2 = json.loads(content2)
+                                        except Exception:
+                                            obj2 = None
+                                        if _is_credit_error(obj2):
+                                            logger.info("Upstream credits not enough for key ...%s", current_key[-6:])
+                                            try:
+                                                await key_manager.refresh_credits(current_key)
+                                            except Exception:
+                                                pass
+                                            await _refund_key_once(current_key)
+                                            if fb_try < 2:
+                                                new_key = await key_manager.reserve_key(cost=cost) if cost > 0 else key_manager.get_next_key(cost=cost)
+                                                if new_key:
+                                                    logger.info("Retrying with another key ...%s", new_key[-6:])
+                                                    current_key = new_key
+                                                    continue
+                                            yield _gemini_error_chunk("apikey credits not enough")
+                                            return
+                                        draw_id2 = None
+                                        if isinstance(obj2, dict):
+                                            if isinstance(obj2.get("data"), dict):
+                                                draw_id2 = obj2["data"].get("id")
+                                            draw_id2 = draw_id2 or obj2.get("id")
+                                        if draw_id2:
+                                            status_box = {}
+                                            async for chunk in poll_and_send(draw_id2, status_box):
+                                                yield chunk
+                                            if status_box.get("done"):
+                                                return
+                                        final_bytes = await _convert_draw_to_gemini_async(
+                                            content2, ct2, True
+                                        )
+                                        yield final_bytes.decode("utf-8", errors="ignore")
+                                        return
+                                except Exception:
+                                    pass
+                                yield _gemini_error_chunk("empty stream")
+                            return
             except Exception as exc:
                 logger.error("Gemini mapped stream error: %s", repr(exc))
-                yield 'data: {"error": "Stream failed"}\n\n'
+                await _refund_key_once(current_key)
+                yield _gemini_error_chunk("stream failed")
 
         return StreamingResponse(stream_gemini_from_draw(), media_type="text/event-stream")
     response_headers = {}
@@ -665,27 +1082,60 @@ async def proxy_request(request: Request, path: str) -> Response:
             )
     except httpx.RequestError as exc:
         logger.error("Upstream request error: %s", repr(exc))
+        if cost > 0 and selected_key:
+            await key_manager.refund_credits(selected_key, cost)
         return Response(
             content=b'{"error": "Upstream request failed"}',
             status_code=502,
             media_type="application/json",
         )
+    logger.info("Upstream content-type (normal): %s", upstream_resp.headers.get("content-type", "") or "<missing>")
+    # Log draw result summary for non-stream responses
+    if "/v1/draw/" in path or path.startswith("v1/draw/"):
+        try:
+            ct = upstream_resp.headers.get("content-type", "")
+            if "application/json" in ct:
+                obj = json.loads(upstream_resp.content)
+                d = obj.get("data") if isinstance(obj.get("data"), dict) else obj
+                results = d.get("results") if isinstance(d, dict) else []
+                first_url = ""
+                if isinstance(results, list) and results:
+                    r0 = results[0] if isinstance(results[0], dict) else {}
+                    first_url = r0.get("url") or ""
+                logger.info(
+                    "Draw result status=%s has_results=%s results_count=%s first_url=%s error=%s",
+                    d.get("status") if isinstance(d, dict) else None,
+                    bool(results),
+                    len(results) if isinstance(results, list) else 0,
+                    first_url[:200],
+                    str(d.get("error") or d.get("failure_reason") or obj.get("msg") or ""),
+                )
+        except Exception:
+            pass
 
-    # 请求成功且有固定积分消耗时，检查是否真正成功再扣除
-    if upstream_resp.status_code == 200 and cost > 0:
-        should_charge = True
+    # Pre-deducted credits: keep on success, refund on failure
+    if cost > 0 and selected_key:
+        should_keep = upstream_resp.status_code == 200
+        credit_err = False
         if "/v1/draw/" in path or path.startswith("v1/draw/"):
-            should_charge = _check_draw_succeeded(
+            should_keep = should_keep and _check_draw_succeeded(
                 upstream_resp.content,
                 upstream_resp.headers.get("content-type", "")
             )
-        if should_charge:
-            key_manager.deduct_credits(selected_key, cost)
-        else:
-            logger.info(
-                "Key ...%s NOT charged (draw failed/moderated), cost=%d returned",
-                selected_key[-6:], cost
-            )
+            ct = upstream_resp.headers.get("content-type", "")
+            if "application/json" in ct:
+                try:
+                    credit_err = _is_credit_error(json.loads(upstream_resp.content))
+                except Exception:
+                    credit_err = False
+        if credit_err:
+            try:
+                await key_manager.refresh_credits(selected_key)
+            except Exception:
+                pass
+            logger.info("Key ...%s not refunded due to credit error", selected_key[-6:])
+        elif not should_keep:
+            await key_manager.refund_credits(selected_key, cost)
 
     # Strip hop-by-hop headers from upstream response
     response_headers = {

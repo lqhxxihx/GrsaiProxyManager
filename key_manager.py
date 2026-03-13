@@ -101,6 +101,49 @@ class KeyManager:
                 return entry["key"]
         return None
 
+    async def reserve_key(self, cost: int) -> Optional[str]:
+        """
+        Reserve credits BEFORE sending request.
+        Returns key if reserved; credits are deducted immediately.
+        """
+        if cost <= 0:
+            return self.get_next_key(cost=cost)
+        if not self.keys:
+            return None
+        required = max(MIN_CREDITS, cost)
+        async with self._lock:
+            n = len(self.keys)
+            for i in range(n):
+                idx = (self.current_index + i) % n
+                entry = self.keys[idx]
+                if entry["active"] and entry["credits"] >= required:
+                    entry["credits"] = max(0, entry["credits"] - cost)
+                    entry["active"] = entry["credits"] > MIN_CREDITS
+                    self.current_index = (idx + 1) % n
+                    _save_cache(self.keys)
+                    logger.info(
+                        "Key ...%s reserved %d credits, remaining=%d, active=%s",
+                        entry["key"][-6:], cost, entry["credits"], entry["active"],
+                    )
+                    return entry["key"]
+        return None
+
+    async def refund_credits(self, key: str, cost: int) -> None:
+        """Refund previously reserved credits."""
+        if cost <= 0:
+            return
+        async with self._lock:
+            for entry in self.keys:
+                if entry["key"] == key:
+                    entry["credits"] += cost
+                    entry["active"] = entry["credits"] > MIN_CREDITS
+                    logger.info(
+                        "Key ...%s refunded %d credits, remaining=%d, active=%s",
+                        key[-6:], cost, entry["credits"], entry["active"],
+                    )
+                    _save_cache(self.keys)
+                    break
+
     def deduct_credits(self, key: str, cost: int) -> None:
         """Deduct credits locally after a successful request."""
         if cost <= 0:
