@@ -57,25 +57,23 @@ docker run -d -p 1515:1515 --env-file .env --name grsai-proxy grsai-proxy
 
 ## 更新
 
+> 仅同步仓库内**已跟踪文件**的修改与删除，不会动本地未跟踪文件。
+
 ### 本地运行更新
 
 ```bash
-# 拉取远端全部更新，并删除本地多余文件（保持与仓库完全一致）
-git fetch --all
-git reset --hard origin/master
-git clean -fdx
+git pull --ff-only
 uvicorn main:app --port 1515
 ```
 
 ### Docker 更新
 
 ```bash
-# 拉取远端全部更新，并删除本地多余文件（保持与仓库完全一致）
-git fetch --all
-git reset --hard origin/master
-git clean -fdx
+git pull --ff-only
 docker compose up -d --build
 ```
+
+> 本地运行所需文件（如 `.env`、`keys_cache.json`）由你自行维护，仓库不会覆盖未跟踪文件。
 
 ## 访问地址
 
