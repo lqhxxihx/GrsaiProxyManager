@@ -1,8 +1,7 @@
 # 积分缓存（含运行时状态，不需要提交）
 keys_cache.json
 
-# 环境变量 / 密码文件
-.env
+# 密码文件
 .password
 
 # Python
