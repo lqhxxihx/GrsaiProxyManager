@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Key 管理面板</title>
+<link rel="icon" href="/ui/admin/favicon.ico">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Segoe UI,PingFang SC,Microsoft YaHei,sans-serif;background:linear-gradient(135deg,#0f0c29 0%,#302b63 55%,#24243e 100%);min-height:100vh;color:#e2e8f0}
+.navbar{background:rgba(255,255,255,.05);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.1);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.navbar .brand{font-size:1.2rem;font-weight:700;background:linear-gradient(90deg,#a78bfa,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.navbar .nav-link{color:rgba(255,255,255,.55);text-decoration:none;font-size:.875rem;padding:6px 16px;border-radius:20px;border:1px solid rgba(255,255,255,.15);transition:all .2s}
+.navbar .nav-link:hover{background:rgba(255,255,255,.1);color:#fff}
+.container{max-width:1200px;margin:0 auto;padding:28px 20px}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+.stat-card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:22px 24px;backdrop-filter:blur(10px);transition:transform .2s}
+.stat-card:hover{transform:translateY(-2px)}
+.stat-label{font-size:.8rem;color:rgba(255,255,255,.45);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+.stat-value{font-size:2rem;font-weight:800;background:linear-gradient(90deg,#a78bfa,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:hidden;backdrop-filter:blur(10px)}
+.card-header{padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.card-title{font-size:.95rem;font-weight:600;color:#e2e8f0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filter-group{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:5px 10px}
+.filter-group label{font-size:.78rem;color:rgba(255,255,255,.45);white-space:nowrap}
+.filter-input{background:transparent;border:none;color:#e2e8f0;font-size:.875rem;outline:none;width:80px}
+.filter-select{background:transparent;border:none;color:#e2e8f0;font-size:.875rem;outline:none;cursor:pointer}
+.filter-select option{background:#302b63}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-size:.8rem;font-weight:500;transition:all .15s;white-space:nowrap}
+.btn:active{transform:scale(.96)}
+.btn-primary{background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;box-shadow:0 2px 8px rgba(79,70,229,.4)}
+.btn-primary:hover{filter:brightness(1.15)}
+.btn-secondary{background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15)}
+.btn-secondary:hover{background:rgba(255,255,255,.15)}
+.btn-danger{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+.btn-danger:hover{background:rgba(239,68,68,.3)}
+.btn-sm{padding:4px 10px;font-size:.75rem}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:.875rem}
+th{text-align:left;padding:11px 16px;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.08);font-weight:600;color:rgba(255,255,255,.45);font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+td{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.03)}
+.row-num{color:rgba(255,255,255,.2);font-size:.8rem}
+.key-hint{font-family:Courier New,monospace;color:#c4b5fd;font-size:.82rem;background:rgba(124,58,237,.12);padding:2px 8px;border-radius:5px}
+.credits-wrap{min-width:140px}
+.credits-nums{font-size:.82rem;color:rgba(255,255,255,.6);margin-bottom:4px}
+.credits-bar{height:5px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden}
+.credits-fill{height:100%;border-radius:3px;transition:width .4s}
+.fill-good{background:linear-gradient(90deg,#10b981,#34d399)}
+.fill-mid{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.fill-low{background:linear-gradient(90deg,#ef4444,#f87171)}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600}
+.badge-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.badge-active{background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3)}
+.badge-active .badge-dot{background:#10b981;box-shadow:0 0 5px #10b981}
+.badge-inactive{background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)}
+.badge-inactive .badge-dot{background:#ef4444}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal{background:#1e1b4b;border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:28px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.5);position:relative}
+.modal-title{font-size:1.1rem;font-weight:700;color:#e2e8f0;margin-bottom:6px}
+.modal-sub{font-size:.85rem;color:rgba(255,255,255,.4);margin-bottom:16px}
+.modal-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.08);border:none;color:#a0aec0;width:30px;height:30px;border-radius:7px;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s}
+.modal-close:hover{background:rgba(255,255,255,.15);color:#fff}
+.modal textarea{width:100%;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:12px;font-size:.875rem;resize:vertical;outline:none;color:#e2e8f0;font-family:Courier New,monospace;line-height:1.6;min-height:150px}
+.modal textarea:focus{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,.2)}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.modal-result{display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:.85rem}
+.modal-result.ok{display:block;background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);color:#34d399}
+.modal-result.err{display:block;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171}
+.toast-wrap{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{padding:11px 18px;border-radius:10px;font-size:.875rem;font-weight:500;backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.15);pointer-events:all;animation:toastIn .25s ease}
+.toast-success{background:rgba(16,185,129,.92);color:#fff}
+.toast-error{background:rgba(239,68,68,.92);color:#fff}
+.toast-info{background:rgba(79,70,229,.92);color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.empty-cell{text-align:center;padding:48px;color:rgba(255,255,255,.25);font-size:.9rem}
+@media(max-width:640px){.stats-grid{grid-template-columns:1fr}.card-header{flex-direction:column;align-items:flex-start}}
+body.light{background:#f0f2f8;color:#1a1a2e}
+body.light .navbar{background:#ffffff;border-bottom:1px solid rgba(0,0,0,0.1)}
+body.light .stat-card{background:#ffffff;border:1px solid rgba(0,0,0,0.1)}
+body.light .card{background:#ffffff;border:1px solid rgba(0,0,0,0.1)}
+body.light .card-header{border-bottom:1px solid rgba(0,0,0,0.08)}
+body.light .card-title{color:#1a1a2e}
+body.light .stat-label{color:rgba(0,0,0,0.45)}
+body.light th{background:rgba(0,0,0,0.03);border-bottom:1px solid rgba(0,0,0,0.08);color:rgba(0,0,0,0.45)}
+body.light td{border-bottom:1px solid rgba(0,0,0,0.06);color:#1a1a2e}
+body.light tbody tr:hover td{background:#f5f7ff}
+body.light .row-num{color:rgba(0,0,0,0.25)}
+body.light .key-hint{background:rgba(109,40,217,0.1);color:#6d28d9}
+body.light .credits-nums{color:rgba(0,0,0,0.6)}
+body.light .credits-bar{background:rgba(0,0,0,0.1)}
+body.light .filter-group{background:rgba(0,0,0,0.04);border:1px solid rgba(0,0,0,0.1)}
+body.light .filter-group label{color:rgba(0,0,0,0.5)}
+body.light .filter-input{color:#1a1a2e}
+body.light .filter-select{color:#1a1a2e}
+body.light .filter-select option{background:#ffffff;color:#1a1a2e}
+body.light .btn-secondary{background:rgba(0,0,0,0.06);color:#1a1a2e;border:1px solid rgba(0,0,0,0.15)}
+body.light .btn-secondary:hover{background:rgba(0,0,0,0.12)}
+body.light .navbar .nav-link{color:rgba(0,0,0,0.55);border:1px solid rgba(0,0,0,0.15)}
+body.light .navbar .nav-link:hover{background:rgba(0,0,0,0.08);color:#1a1a2e}
+body.light .navbar button{color:#1a1a2e !important;-webkit-text-fill-color:#1a1a2e !important}
+body.light .modal{background:#ffffff;border:1px solid rgba(0,0,0,0.15)}
+body.light .modal-title{color:#1a1a2e}
+body.light .modal-sub{color:rgba(0,0,0,0.45)}
+body.light .modal textarea{background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.15);color:#1a1a2e}
+body.light .modal-close{background:rgba(0,0,0,0.06);color:#555}
+body.light .empty-cell{color:rgba(0,0,0,0.3)}
+body.light #pagination{border-top:1px solid rgba(0,0,0,0.08)}
+body.light #pageInfo{color:rgba(0,0,0,0.55) !important}
+body.light #pageNum{color:#6d28d9 !important}
+body.light #pageSizeSelect,body.light #prevPage,body.light #nextPage,body.light #firstPage,body.light #lastPage{background:rgba(0,0,0,0.05);border:1px solid rgba(0,0,0,0.12);color:#1a1a2e !important}
+body.light td[style*="rgba(255,255,255"]{color:#555 !important}
+body.light td{color:#1a1a2e !important}
+#themeToggle{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:20px;color:rgba(255,255,255,.8);cursor:pointer;font-size:.82rem;padding:6px 14px;transition:all .2s}
+#themeToggle:hover{background:rgba(255,255,255,.15)}
+body.light #themeToggle{background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.15);color:#1a1a2e}
+body.light #themeToggle:hover{background:rgba(0,0,0,.12)}
+</style>
+</head>
+<body>
+<div class="navbar">
+  <div class="brand">Key 管理面板</div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button id="themeToggle" onclick="toggleTheme()">&#9788; 浅色</button>
+    <a href="/ui/" class="nav-link">前往代理界面</a>
+    <button class="nav-link" style="cursor:pointer;" onclick="openChangePwd()">修改密码</button>
+    <button class="nav-link" style="cursor:pointer;background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.3);color:#f87171;" onclick="doLogout()">退出登录</button>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <button class="modal-close" id="modalCloseBtn">&#215;</button>
+    <div class="modal-title">批量添加 Keys</div>
+    <div class="modal-sub">每行一个 Key，支持批量粘贴，系统自动去重。</div>
+    <textarea id="addKeyInput" placeholder="sk-xxxxxxxxxxxxxxxxxxxx"></textarea>
+    <div class="modal-result" id="modalResult"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="modalCancelBtn">取消</button>
+      <button class="btn btn-primary" id="addBtn">提交</button>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">总 Key 数</div>
+      <div class="stat-value" id="statTotal">&#8212;</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">可用 Key</div>
+      <div class="stat-value" id="statActive">&#8212;</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">总积分</div>
+      <div class="stat-value" id="statCredits">&#8212;</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">API Key 列表</span>
+      <div class="toolbar">
+        <div class="filter-group">
+          <label>积分 &le;</label>
+          <input type="number" class="filter-input" id="filterCredits" value="5000" placeholder="5000" min="0" oninput="renderTable()">
+          <button class="btn btn-secondary btn-sm" id="btnRefreshByCredits">刷新</button>
+          <button class="btn btn-danger btn-sm" id="btnDeleteByCredits">删除</button>
+        </div>
+        <div class="filter-group">
+          <label>状态</label>
+          <select class="filter-select" id="filterStatus">
+            <option value="all">全部</option>
+            <option value="active">可用</option>
+            <option value="inactive">不可用</option>
+          </select>
+          <button class="btn btn-danger btn-sm" id="btnDeleteByStatus">删除</button>
+        </div>
+        <button class="btn btn-secondary" id="btnRefreshAll">刷新全部</button>
+        <button class="btn btn-secondary" id="btnRefreshUnchecked">🔄 刷新未检测</button>
+        <button class="btn btn-primary" id="btnOpenModal">+ 添加 Key</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Key</th><th>积分</th><th>状态</th><th>最后检测</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr><td colspan="6" class="empty-cell">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- 分页 -->
+    <div id="pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-top:1px solid rgba(255,255,255,0.08);">
+      <div style="font-size:0.82rem;color:rgba(255,255,255,0.4);" id="pageInfo"></div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <select id="pageSizeSelect" onchange="onPageSizeChange()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:0.82rem;outline:none;">
+          <option value="20" selected>20条/页</option>
+          <option value="50">50条/页</option>
+          <option value="100">100条/页</option>
+        </select>
+        <button id="firstPage" onclick="gotoPage(1)" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 10px;color:#e2e8f0;cursor:pointer;font-size:0.82rem;">«</button>
+        <button id="prevPage" onclick="changePage(-1)" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 12px;color:#e2e8f0;cursor:pointer;font-size:0.82rem;">‹ 上一页</button>
+        <span id="pageNum" style="font-size:0.82rem;color:#a78bfa;"></span>
+        <button id="nextPage" onclick="changePage(1)" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 12px;color:#e2e8f0;cursor:pointer;font-size:0.82rem;">下一页 ›</button>
+        <button id="lastPage" onclick="gotoLastPage()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:4px 10px;color:#e2e8f0;cursor:pointer;font-size:0.82rem;">»</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+var keysData = [];
+var CREDITS_MAX = 5000;
+var currentPage = 1;
+var pageSize = 20;
+
+function onPageSizeChange() {
+  pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+  currentPage = 1;
+  renderTable();
+}
+
+function changePage(delta) {
+  var filtered = getFiltered();
+  var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  currentPage = Math.max(1, Math.min(currentPage + delta, totalPages));
+  renderTable();
+}
+
+function gotoPage(page) {
+  currentPage = page;
+  renderTable();
+}
+
+function gotoLastPage() {
+  var filtered = getFiltered();
+  currentPage = Math.max(1, Math.ceil(filtered.length / pageSize));
+  renderTable();
+}
+
+function apiFetch(path, opts) {
+  return fetch(path, opts).then(function(r) {
+    if (!r.ok) { return r.text().then(function(t){ throw new Error(t || r.status); }); }
+    return r.json();
+  });
+}
+
+function loadKeys() {
+  return apiFetch("/admin/keys").then(function(data) {
+    keysData = data.keys || [];
+    renderStats();
+    renderTable();
+  }).catch(function(e) {
+    showToast("加载失败: " + e.message, "error");
+  });
+}
+
+// 每10秒自动轮询更新
+setInterval(function() { loadKeys(); }, 10000);
+
+function renderStats() {
+  var total = keysData.length;
+  var active = 0;
+  var credits = 0;
+  for (var i = 0; i < keysData.length; i++) {
+    if (keysData[i].active) active++;
+    credits += (keysData[i].credits || 0);
+  }
+  document.getElementById("statTotal").textContent = total;
+  document.getElementById("statActive").textContent = active;
+  document.getElementById("statCredits").textContent = credits.toLocaleString();
+}
+
+function getFiltered() {
+  var maxVal = parseFloat(document.getElementById("filterCredits").value);
+  var status = document.getElementById("filterStatus").value;
+  var out = [];
+  for (var i = 0; i < keysData.length; i++) {
+    var k = keysData[i];
+    if (!isNaN(maxVal) && (k.credits || 0) > maxVal) continue;
+    if (status === "active" && !k.active) continue;
+    if (status === "inactive" && k.active) continue;
+    out.push(k);
+  }
+  return out;
+}
+
+function renderTable() {
+  var tbody = document.getElementById('tableBody');
+  var filtered = getFiltered();
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">' +
+      (keysData.length ? '无符合条件的 Key' : '暂无 Key') +
+      '</td></tr>';
+    document.getElementById('pageInfo').textContent = '';
+    document.getElementById('pageNum').textContent = '';
+    document.getElementById('firstPage').disabled = true;
+    document.getElementById('prevPage').disabled = true;
+    document.getElementById('nextPage').disabled = true;
+    document.getElementById('lastPage').disabled = true;
+    return;
+  }
+  var totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  if (currentPage > totalPages) currentPage = totalPages;
+  var start = (currentPage - 1) * pageSize;
+  var end = Math.min(start + pageSize, filtered.length);
+  var paged = filtered.slice(start, end);
+  document.getElementById('pageInfo').textContent = '共 ' + filtered.length + ' 条，显示 ' + (start+1) + '-' + end;
+  document.getElementById('pageNum').textContent = currentPage + ' / ' + totalPages;
+  document.getElementById('firstPage').disabled = currentPage <= 1;
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
+  document.getElementById('lastPage').disabled = currentPage >= totalPages;
+  var rows = '';
+  for (var i = 0; i < paged.length; i++) {
+    var k = paged[i];
+    var credits = k.credits || 0;
+    var pct = Math.min(100, Math.round(credits / CREDITS_MAX * 100));
+    var fillCls = pct < 20 ? 'fill-low' : (pct < 50 ? 'fill-mid' : 'fill-good');
+    var hint = k.key_hint || '';
+    var lc = k.last_checked ? new Date(k.last_checked.endsWith('Z') ? k.last_checked : k.last_checked + 'Z').toLocaleString('zh-CN') : '未检测';
+    var badgeCls = k.active ? 'badge-active' : 'badge-inactive';
+    var badgeTxt = k.active ? '可用' : '不可用';
+    var safeHint = hint.replace(/'/g, "\'");
+    rows += '<tr>';
+    rows += '<td class="row-num">' + (start + i + 1) + '</td>';
+    rows += '<td><span class="key-hint">' + hint + '</span></td>';
+    rows += '<td><div class="credits-wrap">' +
+      '<div class="credits-nums">' + credits.toLocaleString() + ' / ' + CREDITS_MAX + '</div>' +
+      '<div class="credits-bar"><div class="credits-fill ' + fillCls + '" style="width:' + pct + '%"></div></div>' +
+      '</div></td>';
+    rows += '<td><span class="badge ' + badgeCls + '"><span class="badge-dot"></span>' + badgeTxt + '</span></td>';
+    rows += '<td style="color:rgba(255,255,255,.35);font-size:.8rem">' + lc + '</td>';
+    rows += '<td><button class="btn btn-danger btn-sm" onclick="deleteKey(\'' + safeHint + '\')">' + '删除' + '</button></td>';
+    rows += '</tr>';
+  }
+  tbody.innerHTML = rows;
+}
+
+function deleteKey(hint) {
+  if (!confirm('\u786e\u8ba4\u5220\u9664\u8be5 Key\uff1f')) return;
+  apiFetch('/admin/keys/' + encodeURIComponent(hint), {method: 'DELETE'})
+    .then(function(d) {
+      showToast(d.deleted > 0 ? '\u5df2\u5220\u9664' : '\u672a\u627e\u5230\u8be5 Key', d.deleted > 0 ? 'success' : 'error');
+      if (d.deleted > 0) loadKeys();
+    })
+    .catch(function(e) { showToast('\u5220\u9664\u5931\u8d25: ' + e.message, 'error'); });
+}
+
+function batchDelete(list, label) {
+  if (!list.length) { showToast('\u65e0\u7b26\u5408\u6761\u4ef6\u7684 Key', 'error'); return; }
+  if (!confirm('\u786e\u8ba4\u5220\u9664 ' + list.length + ' \u4e2a' + label + ' Key\uff1f')) return;
+  var done = 0;
+  var total = list.length;
+  function next(idx) {
+    if (idx >= total) {
+      showToast('\u5df2\u5220\u9664 ' + done + ' \u4e2a Key', 'success');
+      loadKeys();
+      return;
+    }
+    var hint = list[idx].key_hint || '';
+    apiFetch('/admin/keys/' + encodeURIComponent(hint), {method: 'DELETE'})
+      .then(function(d) { if (d.deleted > 0) done++; next(idx + 1); })
+      .catch(function() { next(idx + 1); });
+  }
+  next(0);
+}
+
+function deleteByCredits() {
+  var maxVal = parseFloat(document.getElementById('filterCredits').value);
+  if (isNaN(maxVal)) { showToast('请输入积分阈值', 'error'); return; }
+  showToast('正在刷新积分，请稍候...', 'success');
+  apiFetch('/admin/keys/refresh', {method: 'POST'})
+    .then(function(data) {
+      keysData = data.keys || [];
+      renderStats();
+      renderTable();
+      var toDelete = keysData.filter(function(k) { return (k.credits || 0) <= maxVal; });
+      var toKeep = keysData.filter(function(k) { return (k.credits || 0) > maxVal; });
+      if (toKeep.length > 0 && toDelete.length === 0) {
+        showToast(toKeep.length + ' 个 Key 积分均超过阈值，已更新显示', 'success');
+        return;
+      }
+      if (!toDelete.length) {
+        showToast('刷新后无积分 ≤ ' + maxVal + ' 的 Key', 'success');
+        return;
+      }
+      if (!confirm('刷新后确认删除 ' + toDelete.length + ' 个积分 ≤ ' + maxVal + ' 的 Key？')) return;
+      var done = 0;
+      function next(idx) {
+        if (idx >= toDelete.length) { showToast('已删除 ' + done + ' 个 Key', 'success'); loadKeys(); return; }
+        var hint = toDelete[idx].key_hint || '';
+        apiFetch('/admin/keys/' + encodeURIComponent(hint), {method: 'DELETE'})
+          .then(function(d) { if (d.deleted > 0) done++; next(idx + 1); })
+          .catch(function() { next(idx + 1); });
+      }
+      next(0);
+    })
+    .catch(function(e) { showToast('刷新失败: ' + e.message, 'error'); });
+}
+
+function deleteByStatus() {
+  var status = document.getElementById('filterStatus').value;
+  if (status === 'all') { showToast('\u8bf7\u9009\u62e9\u5177\u4f53\u72b6\u6001', 'error'); return; }
+  var list = [];
+  for (var i = 0; i < keysData.length; i++) {
+    var k = keysData[i];
+    if (status === 'active' && k.active) list.push(k);
+    if (status === 'inactive' && !k.active) list.push(k);
+  }
+  var label = status === 'active' ? '\u53ef\u7528' : '\u4e0d\u53ef\u7528';
+  batchDelete(list, label);
+}
+
+function refreshByCredits() {
+  var filtered = getFiltered();
+  if (!filtered.length) { showToast('无符合条件的 Key', 'error'); return; }
+  var btn = document.getElementById('btnRefreshByCredits');
+  btn.disabled = true;
+  btn.textContent = '刷新中...';
+  var hints = filtered.map(function(k) { return (k.key_hint || '').replace('...', ''); });
+  apiFetch('/admin/keys/refresh-subset', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({keys: hints})
+  })
+    .then(function(data) {
+      keysData = data.keys || [];
+      renderStats();
+      renderTable();
+      showToast('已刷新 ' + filtered.length + ' 个筛选 Key 的积分', 'success');
+    })
+    .catch(function(e) { showToast('刷新失败: ' + e.message, 'error'); })
+    .finally(function() { btn.disabled = false; btn.textContent = '🔄 刷新'; });
+  // 同时每2秒轮询实时更新
+  var pollCount = 0;
+  var pollTimer = setInterval(function() {
+    pollCount++;
+    loadKeys();
+    if (pollCount >= 15) clearInterval(pollTimer);
+  }, 2000);
+}
+
+function refreshUnchecked() {
+  var unchecked = keysData.filter(function(k) { return !k.last_checked; });
+  if (!unchecked.length) { showToast('没有未检测的 Key', 'info'); return; }
+  var btn = document.getElementById('btnRefreshUnchecked');
+  btn.disabled = true;
+  btn.textContent = '刷新中...';
+  // 后端全量刷新后筛选显示
+  apiFetch('/admin/keys/refresh', {method: 'POST'})
+    .then(function(data) {
+      keysData = data.keys || [];
+      renderStats();
+      renderTable();
+      showToast('未检测 Key 已刷新', 'success');
+    })
+    .catch(function(e) { showToast('刷新失败: ' + e.message, 'error'); })
+    .finally(function() { btn.disabled = false; btn.textContent = '🔄 刷新未检测'; });
+}
+
+function refreshAll() {
+  var btn = document.getElementById('btnRefreshAll');
+  btn.disabled = true;
+  btn.textContent = '\u5237\u65b0\u4e2d...';
+  apiFetch('/admin/keys/refresh', {method: 'POST'})
+    .then(function(data) {
+      keysData = data.keys || [];
+      renderStats();
+      renderTable();
+      showToast('\u5237\u65b0\u5b8c\u6210', 'success');
+    })
+    .catch(function(e) { showToast('\u5237\u65b0\u5931\u8d25: ' + e.message, 'error'); })
+    .finally(function() { btn.disabled = false; btn.textContent = '\u5237\u65b0\u5168\u90e8'; });
+}
+
+function openModal() {
+  document.getElementById('addKeyInput').value = '';
+  document.getElementById('modalResult').className = 'modal-result';
+  document.getElementById('modalResult').textContent = '';
+  document.getElementById('addModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('addModal').classList.remove('active');
+}
+
+function submitKeys() {
+  var raw = document.getElementById('addKeyInput').value.trim();
+  if (!raw) { showToast('\u8bf7\u8f93\u5165 Key', 'error'); return; }
+  var keys = raw.split(/[\r\n]+/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length > 0; });
+  if (!keys.length) { showToast('\u672a\u68c0\u6d4b\u5230\u6709\u6548 Key', 'error'); return; }
+  var btn = document.getElementById('addBtn');
+  btn.disabled = true;
+  btn.textContent = '\u63d0\u4ea4\u4e2d...';
+  apiFetch('/admin/keys', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({keys: keys})
+  }).then(function(d) {
+    var res = document.getElementById('modalResult');
+    res.className = 'modal-result ok';
+    res.textContent = '\u6dfb\u52a0 ' + d.added + ' \u4e2a\uff0c\u8df3\u8fc7 ' + d.skipped + ' \u4e2a\u91cd\u590d';
+    loadKeys();
+    // 新增 Key 后轮询刷新积分
+    var pollCount = 0;
+    var pollTimer = setInterval(function() {
+      pollCount++;
+      loadKeys();
+      if (pollCount >= 10) clearInterval(pollTimer);
+    }, 2000);
+  }).catch(function(e) {
+    var res = document.getElementById('modalResult');
+    res.className = 'modal-result err';
+    res.textContent = '\u6dfb\u52a0\u5931\u8d25: ' + e.message;
+  }).finally(function() {
+    btn.disabled = false;
+    btn.textContent = '\u63d0\u4ea4';
+  });
+}
+
+function showToast(msg, type) {
+  type = type || 'info';
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  document.getElementById('toastWrap').appendChild(el);
+  setTimeout(function() { el.remove(); }, 3000);
+}
+
+document.getElementById('btnRefreshByCredits').onclick = refreshByCredits;
+document.getElementById('btnDeleteByCredits').onclick = deleteByCredits;
+document.getElementById('btnDeleteByStatus').onclick = deleteByStatus;
+document.getElementById('btnRefreshAll').onclick = refreshAll;
+document.getElementById('btnRefreshUnchecked').onclick = refreshUnchecked;
+document.getElementById('btnOpenModal').onclick = openModal;
+document.getElementById('modalCloseBtn').onclick = closeModal;
+document.getElementById('modalCancelBtn').onclick = closeModal;
+document.getElementById('addBtn').onclick = submitKeys;
+document.getElementById('filterStatus').onchange = renderTable;
+document.getElementById('addModal').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+loadKeys();
+
+// Theme toggle
+(function(){
+  var saved = localStorage.getItem('admin_theme');
+  if (saved === 'light') { document.body.classList.add('light'); }
+  updateThemeBtn();
+})();
+function updateThemeBtn(){
+  var btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  if (document.body.classList.contains('light')) {
+    btn.innerHTML = '&#9790; 深色';
+  } else {
+    btn.innerHTML = '&#9788; 浅色';
+  }
+}
+function toggleTheme(){
+  document.body.classList.toggle('light');
+  localStorage.setItem('admin_theme', document.body.classList.contains('light') ? 'light' : 'dark');
+  updateThemeBtn();
+}
+
+// 验证登录状态
+fetch('/admin/check').then(function(r) {
+  if (r.status === 401) window.location.href = '/ui/admin/login';
+});
+
+function doLogout() {
+  fetch('/admin/logout', {method:'POST'})
+    .then(function() { window.location.href = '/ui/admin/login'; })
+    .catch(function() { window.location.href = '/ui/admin/login'; });
+}
+
+function openChangePwd() {
+  document.getElementById('changePwdModal').style.display = 'flex';
+}
+function closeChangePwd() {
+  document.getElementById('changePwdModal').style.display = 'none';
+  document.getElementById('oldPwd').value = '';
+  document.getElementById('newPwd').value = '';
+  document.getElementById('confirmPwd').value = '';
+}
+async function submitChangePwd() {
+  var oldPwd = document.getElementById('oldPwd').value;
+  var newPwd = document.getElementById('newPwd').value;
+  var confirmPwd = document.getElementById('confirmPwd').value;
+  if (!oldPwd || !newPwd) { showToast('请填写完整', 'error'); return; }
+  if (newPwd !== confirmPwd) { showToast('两次新密码不一致', 'error'); return; }
+  if (newPwd.length < 6) { showToast('新密码至少6位', 'error'); return; }
+  try {
+    var res = await fetch('/admin/change-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({old_password: oldPwd, new_password: newPwd})
+    });
+    var data = await res.json();
+    if (data.ok) {
+      showToast('密码修改成功', 'success');
+      closeChangePwd();
+    } else {
+      showToast(data.msg || '修改失败', 'error');
+    }
+  } catch(e) { showToast('请求失败: ' + e.message, 'error'); }
+}
+</script>
+
+<!-- 修改密码弹窗 -->
+<div id="changePwdModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:#1e1b4b;border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:28px;width:100%;max-width:400px;box-shadow:0 25px 60px rgba(0,0,0,0.5);">
+    <h3 style="font-size:1.1rem;font-weight:700;color:#e2e8f0;margin-bottom:20px;">修改密码</h3>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:0.82rem;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">原密码</label>
+      <input type="password" id="oldPwd" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:0.875rem;outline:none;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:0.82rem;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">新密码（至少6位）</label>
+      <input type="password" id="newPwd" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:0.875rem;outline:none;">
+    </div>
+    <div style="margin-bottom:20px;">
+      <label style="font-size:0.82rem;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">确认新密码</label>
+      <input type="password" id="confirmPwd" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:0.875rem;outline:none;">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button onclick="closeChangePwd()" style="padding:8px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#e2e8f0;cursor:pointer;font-size:0.875rem;">取消</button>
+      <button onclick="submitChangePwd()" style="padding:8px 16px;border-radius:8px;border:none;background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;cursor:pointer;font-size:0.875rem;font-weight:600;">确认修改</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
