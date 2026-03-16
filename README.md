@@ -48,8 +48,6 @@ cd GrsaiProxyManager
 docker compose up -d
 ```
 
-> 首次启动会在 `data/` 目录自动创建 `keys_cache.json` 和 `.password`。
-
 或手动构建：
 
 ```bash
