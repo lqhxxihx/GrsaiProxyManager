@@ -749,6 +749,18 @@ async def proxy_request(request: Request, path: str) -> Response:
                 _d["aspectRatio"] = aspect
             if size and not _d.get("imageSize"):
                 _d["imageSize"] = size
+            # If model doesn't support imageSize, drop it instead of failing
+            if _d.get("imageSize"):
+                _model = _d.get("model")
+                if _model not in {
+                    "nano-banana-2",
+                    "nano-banana-pro",
+                    "nano-banana-pro-vt",
+                    "nano-banana-pro-cl",
+                    "nano-banana-pro-vip",
+                    "nano-banana-pro-4k-vip",
+                }:
+                    _d.pop("imageSize", None)
             err = _validate_draw_payload(_d)
             if err:
                 return Response(
