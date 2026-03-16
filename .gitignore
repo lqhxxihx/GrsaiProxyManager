@@ -1,4 +1,6 @@
 # 积分缓存（含运行时状态，不需要提交）
+data/*
+!data/.gitkeep
 keys_cache.json
 
 # 密码文件

@@ -8,8 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # .dockerignore 已排除 .env .password keys_cache.json
 COPY . .
 
-# 确保持久化文件存在（volume 挂载时需要文件而非目录）
-RUN touch /app/keys_cache.json /app/.password && \
+# 确保持久化文件存在（volume 挂载目录）
+RUN mkdir -p /app/data && \
+    touch /app/data/keys_cache.json /app/data/.password && \
     echo 'GRSAI_API_KEYS=\nMIN_CREDITS=400\nCREDITS_REFRESH_INTERVAL=300\nPORT=1515' > /app/.env && \
     mkdir -p /app/results
 

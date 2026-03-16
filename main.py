@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from config import UPSTREAM_BASE_URL, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD
+from config import UPSTREAM_BASE_URL, ADMIN_PASSWORD_HASH, ADMIN_PASSWORD, PASSWORD_PATH
 from key_manager import key_manager
 from proxy import proxy_request
 
@@ -159,7 +159,7 @@ async def admin_change_password(body: ChangePasswordRequest, request: Request):
     _pw_hash = new_hash
     # 写入 .password 文件
     try:
-        with open(".password", "w", encoding="utf-8") as f:
+        with open(PASSWORD_PATH, "w", encoding="utf-8") as f:
             f.write(new_hash.decode())
     except Exception as e:
         pass

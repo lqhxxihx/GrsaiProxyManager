@@ -10,11 +10,14 @@ CREDITS_REFRESH_INTERVAL = int(os.getenv("CREDITS_REFRESH_INTERVAL", "300"))
 PORT = int(os.getenv("PORT", "8000"))
 
 DEFAULT_PASSWORD = "admin123456"
+DATA_DIR = os.getenv("DATA_DIR", "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+PASSWORD_PATH = os.path.join(DATA_DIR, ".password")
 
 # 从 .password 文件读取密码哈希，不存在则自动生成默认密码
 def _read_password_hash() -> str:
     try:
-        with open(".password", encoding="utf-8") as f:
+        with open(PASSWORD_PATH, encoding="utf-8") as f:
             h = f.read().strip()
             if h:
                 return h
@@ -23,7 +26,7 @@ def _read_password_hash() -> str:
     # 自动生成默认密码哈希并写入
     h = bcrypt.hashpw(DEFAULT_PASSWORD.encode(), bcrypt.gensalt()).decode()
     try:
-        with open(".password", "w", encoding="utf-8") as f:
+        with open(PASSWORD_PATH, "w", encoding="utf-8") as f:
             f.write(h)
     except Exception:
         pass

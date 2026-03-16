@@ -7,16 +7,22 @@ from typing import Optional
 
 import httpx
 
-from config import API_KEYS, CREDITS_REFRESH_INTERVAL, MIN_CREDITS, UPSTREAM_BASE_URL
+from config import API_KEYS, CREDITS_REFRESH_INTERVAL, MIN_CREDITS, UPSTREAM_BASE_URL, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = "keys_cache.json"
+CACHE_FILE = os.path.join(DATA_DIR, "keys_cache.json")
 
 
 def _load_cache() -> dict:
     """Load key credits/status cache from file."""
     if not os.path.exists(CACHE_FILE):
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+        except Exception:
+            pass
         return {}
     try:
         with open(CACHE_FILE, encoding="utf-8") as f:
